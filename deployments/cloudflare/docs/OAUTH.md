@@ -27,10 +27,11 @@ In `src/index.ts`:
 - `authorizeEndpoint: "/authorize"` -- handled by `defaultHandler`, which validates the request (`parseAuthRequest`), verifies the Cloudflare Access operator assertion, stores short-lived request-bound consent state, and calls `completeAuthorization` only after a CSRF-protected explicit approval (see [`WORKER.md`](WORKER.md#operator-authentication-and-consent)).
 - `tokenEndpoint`, `clientRegistrationEndpoint` -- served entirely by the library.
 - `scopesSupported: ["mcp:invoke"]` -- the only scope this deployment grants.
+- `resourceMetadata` -- generated from the profile's canonical `publicMcpUrl` at build time. The URL includes `/mcp`; its origin is used as the authorization-server issuer.
 
 ## Verifying end to end
 
-After deploying (see [`WORKER.md`](WORKER.md)):
+After deploying with the profile flow in [`WORKER.md`](WORKER.md):
 
 ```bash
 # 1. Unauthenticated /mcp is rejected
@@ -44,10 +45,12 @@ curl -s https://<worker-host>/.well-known/oauth-protected-resource/mcp | jq .
 curl -s https://<worker-host>/.well-known/oauth-authorization-server | jq .
 ```
 
+Protected-resource metadata must report the exact profile `publicMcpUrl`, including `/mcp`. Authorization-server metadata must use the same public Worker origin for its issuer and OAuth endpoints.
+
 Full authorization-code + token exchange is easiest to verify through an actual MCP client (ChatGPT, or `npx @modelcontextprotocol/inspector`) rather than by hand with `curl`, since it involves a browser redirect through `/authorize` and PKCE. See [`CHATGPT_SETUP.md`](../../../docs/CHATGPT_SETUP.md) for the ChatGPT-side registration steps.
 
 For MCP Inspector, configure the deployed Worker as the MCP URL, start the Inspector authorization flow, sign in as the configured Access operator, approve the displayed client and `mcp:invoke` scope, and confirm the Inspector receives both access and refresh tokens. A direct `/authorize` request without a valid Access assertion or a POST without the issued consent cookie/state is rejected.
 
 ## Secrets
 
-Cloudflare Access configuration contains no client secret in this Worker. `OAUTH_KV` holds the provider's clients, grants, and tokens. `CONSENT_STATE` holds the Worker's short-lived consent state and atomically consumes each state through Durable Object storage transactions. Nothing OAuth-related is committed to this repository.
+`OAUTH_KV` holds the provider's own state (registered clients, grants, tokens) and is never read or written directly by this repository's code outside the `OAuthHelpers` interface the library provides. `CONSENT_STATE` holds the Worker's short-lived consent state and atomically consumes each state through Durable Object storage transactions. The origin protection boundary's Access service-token credentials (`GATEWAY_ACCESS_CLIENT_ID` / `GATEWAY_ACCESS_CLIENT_SECRET`) are Wrangler secret bindings. Nothing OAuth-related or secret is committed to this repository.

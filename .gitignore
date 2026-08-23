@@ -28,3 +28,6 @@ test-artifacts/
 .codegraph
 .claude/worktrees/
 .worktrees/
+
+deployments/cloudflare/deployment-profile.local.json
+deployments/cloudflare/worker/wrangler.profile.generated.jsonc
