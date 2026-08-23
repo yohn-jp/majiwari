@@ -1,3 +1,8 @@
+# Superseded by cloudflare_connectivity_directory_service.gateway below: the
+# Worker now reaches the gateway over a Workers VPC Service binding, which
+# routes through the Tunnel without traversing this zone's public hostname or
+# WAF at all. Kept, unused by the Worker, as a rollback path back to the
+# public-hostname-plus-service-token design if the VPC Service beta regresses.
 resource "cloudflare_zero_trust_access_service_token" "worker" {
   account_id = var.cloudflare_account_id
   name       = "Majiwari Worker to gateway Tunnel"
@@ -32,6 +37,25 @@ resource "cloudflare_zero_trust_access_application" "gateway" {
     id         = cloudflare_zero_trust_access_policy.worker.id
     precedence = 1
   }]
+}
+
+# The Worker's actual path to the gateway: a Workers VPC Service binding,
+# routed over the same cloudflared Tunnel via Cloudflare's internal
+# connectivity-directory path (Iris/Apollo), not the public zone. This never
+# touches zone-level WAF, bot management, or DNS -- the gateway has no public
+# hostname on this path at all. See deployments/cloudflare/docs/WORKER.md.
+resource "cloudflare_connectivity_directory_service" "gateway" {
+  account_id = var.cloudflare_account_id
+  name       = "majiwari-gateway"
+  type       = "http"
+  http_port  = 8787
+
+  host = {
+    ipv4 = "127.0.0.1"
+    network = {
+      tunnel_id = var.gateway_tunnel_id
+    }
+  }
 }
 
 resource "cloudflare_zero_trust_access_policy" "mcp" {

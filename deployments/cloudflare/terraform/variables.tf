@@ -5,7 +5,12 @@ variable "cloudflare_account_id" {
 
 variable "gateway_hostname" {
   type        = string
-  description = "Named Tunnel hostname to protect, without a scheme or path."
+  description = "Named Tunnel hostname formerly protecting the gateway origin over the public zone. Kept only for the legacy self_hosted Access Application below, retained as a rollback path now that the gateway is reached over a Workers VPC Service instead."
+}
+
+variable "gateway_tunnel_id" {
+  type        = string
+  description = "ID of the Named Tunnel (cloudflared) that reaches the gateway process. Used by the Workers VPC Service to route Worker traffic to the gateway without traversing the public zone's WAF."
 }
 
 variable "service_token_duration" {

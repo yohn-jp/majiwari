@@ -19,6 +19,7 @@ docs/                         architecture and ChatGPT connection docs
 ```text
 ChatGPT
   -> Cloudflare Worker (/mcp, Access Managed OAuth-protected, origin hidden)
+  -> Workers VPC Service binding (bypasses the public zone's DNS and WAF)
   -> Cloudflare Named Tunnel (outbound-only from the local machine)
   -> gateway/ (generic stdio MCP -> Streamable HTTP)
   -> adapters/open-code-review/ (deterministic MCP tools)
@@ -69,8 +70,10 @@ Equivalent environment-variable form: `OCR_REPO=/absolute/path/to/target-reposit
 To make it reachable over HTTP, put the generic gateway in front of it:
 
 ```bash
-npm run gateway -- --port 8787 -- node adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository
+npm run gateway -- --port 8787 -- node /absolute/path/to/majiwari/adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository
 ```
+
+`npm run gateway` runs the script inside the `gateway` workspace, so its working directory is `gateway/`, not the repo root -- use an absolute path for the target server script, or the gateway will spawn a nonexistent file and every request will hang with an empty response.
 
 The gateway binds to `127.0.0.1` only and never inspects the tools it proxies -- any other stdio MCP server can be given to it the same way.
 
@@ -111,7 +114,7 @@ The same contract is included in the MCP server instructions and in [`plugin/ski
 - unsafe Git refs and newline/NUL injection rejected
 - one configured repository per adapter process
 - gateway binds to `127.0.0.1` only; only the Tunnel is outbound
-- Worker sits behind Cloudflare Access Managed OAuth on `/mcp` and never exposes the Tunnel hostname to a client
+- Worker sits behind Cloudflare Access Managed OAuth on `/mcp` and reaches the gateway over a Workers VPC Service binding, never a public hostname
 - no secret committed to this repository
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

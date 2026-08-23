@@ -23,6 +23,9 @@ function isAuthenticationHeader(name: string): boolean {
   return AUTHENTICATION_HEADERS.has(normalized) || normalized.startsWith("cf-access-");
 }
 
+/** The gateway's fixed address on the Workers VPC Service, matching the VPC Service's host/port in access.tf. */
+export const GATEWAY_VPC_ADDRESS = "http://127.0.0.1:8787";
+
 function filterCookies(value: string): string | null {
   const cookies = value
     .split(";")
@@ -53,21 +56,8 @@ export function filterHeaders(source: Headers): Headers {
   return filtered;
 }
 
-/** Removes client credentials, then adds only the Worker-owned Access token. */
-export function withServiceToken(source: Headers, clientId: string, clientSecret: string): Headers {
-  if (!clientId || !clientSecret) {
-    throw new Error("Gateway Access service-token secrets are not configured");
-  }
-
-  const authenticated = filterHeaders(source);
-  authenticated.set("CF-Access-Client-Id", clientId);
-  authenticated.set("CF-Access-Client-Secret", clientSecret);
-  return authenticated;
-}
-
-/** Rewrites an incoming request's path/query onto the gateway origin. Never touches the path/query themselves. */
-export function buildProxyTarget(requestUrl: string, gatewayOrigin: string): URL {
+/** Rewrites an incoming request's path/query onto the gateway's fixed VPC Service address. Never touches the path/query themselves. */
+export function buildProxyTarget(requestUrl: string): URL {
   const incoming = new URL(requestUrl);
-  const origin = new URL(gatewayOrigin);
-  return new URL(incoming.pathname + incoming.search, origin);
+  return new URL(incoming.pathname + incoming.search, GATEWAY_VPC_ADDRESS);
 }

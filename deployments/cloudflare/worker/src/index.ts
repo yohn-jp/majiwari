@@ -1,14 +1,10 @@
 import { verifyAccessAssertion } from "./access";
-import { buildProxyTarget, filterHeaders, withServiceToken } from "./proxy";
+import { buildProxyTarget, filterHeaders } from "./proxy";
 import { classifyRoute } from "./routes";
 
 export interface Env {
-  /** Tunnel-internal origin for the Majiwari gateway. Never exposed to clients. */
-  GATEWAY_ORIGIN: string;
-  /** Cloudflare Access service-token client ID. Provision with `wrangler secret put`. */
-  GATEWAY_ACCESS_CLIENT_ID: string;
-  /** Cloudflare Access service-token client secret. Provision with `wrangler secret put`. */
-  GATEWAY_ACCESS_CLIENT_SECRET: string;
+  /** Workers VPC Service binding reaching the gateway over the Tunnel, bypassing the public zone's WAF entirely. */
+  GATEWAY_VPC: Fetcher;
   /** Cloudflare Access team issuer protecting /mcp, for example https://team.cloudflareaccess.com. */
   MCP_ACCESS_TEAM_DOMAIN: string;
   /** Cloudflare Access application audience tag for the /mcp Managed OAuth boundary. */
@@ -18,18 +14,19 @@ export interface Env {
 }
 
 /**
- * Proxies /mcp to the gateway's internal origin over the Tunnel. Never
+ * Proxies /mcp to the gateway over the Workers VPC Service binding. Never
  * rewrites MCP semantics (method, headers, streaming body, status) beyond
- * what's required to swap the origin and authenticate the Tunnel -- Cloudflare
- * Access (in front of this Worker) and the Worker-owned Access service token
- * (from this Worker to the origin) are the only things added here.
+ * what's required to swap the target address -- Cloudflare Access (in front
+ * of this Worker) is the only auth layer; the VPC Service binding itself
+ * proves the request came from this Worker, so no origin-side credential is
+ * added here.
  */
 async function proxyToGateway(request: Request, env: Env): Promise<Response> {
-  const target = buildProxyTarget(request.url, env.GATEWAY_ORIGIN);
+  const target = buildProxyTarget(request.url);
 
-  const upstream = await fetch(target, {
+  const upstream = await env.GATEWAY_VPC.fetch(target, {
     method: request.method,
-    headers: withServiceToken(request.headers, env.GATEWAY_ACCESS_CLIENT_ID, env.GATEWAY_ACCESS_CLIENT_SECRET),
+    headers: filterHeaders(request.headers),
     body: request.body,
     // @ts-expect-error -- Workers runtime requires this for streamed request bodies.
     duplex: request.body ? "half" : undefined

@@ -1,8 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual, throws } from "node:assert";
 import { describe, it } from "node:test";
 import {
-  ORIGIN_ACCESS_ID_BINDING,
-  ORIGIN_ACCESS_SECRET_BINDING,
+  GATEWAY_VPC_BINDING,
   ProfileValidationError,
   buildWranglerConfig,
   safeProfileSummary,
@@ -12,12 +11,11 @@ import {
 const validProfile = {
   accountId: "0123456789abcdef0123456789abcdef",
   publicMcpUrl: "https://mcp.test/mcp",
-  gatewayOrigin: "https://gateway.internal.test/mcp",
+  gatewayVpcServiceId: "vpc-service-abc123",
   mcpAccess: {
     teamDomain: "https://majiwari.cloudflareaccess.com",
     audience: "mcp-access-audience"
-  },
-  secretBindings: [ORIGIN_ACCESS_ID_BINDING, ORIGIN_ACCESS_SECRET_BINDING]
+  }
 };
 
 const baseWranglerConfig = {
@@ -36,18 +34,12 @@ describe("deployment profile validation", () => {
   it("rejects placeholders and malformed URLs", () => {
     assertInvalid({
       publicMcpUrl: "REPLACE_WITH_PUBLIC_URL",
-      gatewayOrigin: "http://gateway.example.invalid/not-mcp"
-    }, /placeholder|must use https|exact \/mcp path/);
+      gatewayVpcServiceId: "REPLACE_WITH_GATEWAY_VPC_SERVICE_ID"
+    }, /placeholder/);
   });
 
-  it("rejects a public resource and Tunnel origin with the same origin", () => {
-    assertInvalid({ gatewayOrigin: validProfile.publicMcpUrl }, /public-resource\/origin mismatch/);
-  });
-
-  it("requires both origin-access secret bindings without accepting secret values", () => {
-    assertInvalid({ secretBindings: [] }, /secretBindings must list/);
-    assertInvalid({ secretBindings: [ORIGIN_ACCESS_ID_BINDING] }, new RegExp(`secretBindings must include ${ORIGIN_ACCESS_SECRET_BINDING}`));
-    assertInvalid({ secretBindings: [ORIGIN_ACCESS_SECRET_BINDING] }, new RegExp(`secretBindings must include ${ORIGIN_ACCESS_ID_BINDING}`));
+  it("requires a gatewayVpcServiceId", () => {
+    assertInvalid({ gatewayVpcServiceId: "" }, /gatewayVpcServiceId is required/);
     assertInvalid(
       { mcpAccess: { ...validProfile.mcpAccess, clientSecret: "do-not-print" } },
       /not a supported profile field/
@@ -65,11 +57,10 @@ describe("generated Wrangler configuration", () => {
   it("maps profile values without putting secret values into config", () => {
     const config = buildWranglerConfig(baseWranglerConfig, validProfile);
     strictEqual(config.account_id, validProfile.accountId);
-    strictEqual(config.vars.GATEWAY_ORIGIN, validProfile.gatewayOrigin);
     strictEqual(config.vars.MCP_ACCESS_TEAM_DOMAIN, validProfile.mcpAccess.teamDomain);
     strictEqual(config.vars.MCP_ACCESS_AUDIENCE, validProfile.mcpAccess.audience);
     strictEqual(config.vars.EXISTING, "kept");
-    deepStrictEqual(config.secrets, { required: [ORIGIN_ACCESS_ID_BINDING, ORIGIN_ACCESS_SECRET_BINDING] });
+    deepStrictEqual(config.vpc_services, [{ binding: GATEWAY_VPC_BINDING, service_id: validProfile.gatewayVpcServiceId }]);
     deepStrictEqual(config.routes, [{ pattern: "mcp.test", custom_domain: true }]);
     doesNotMatch(JSON.stringify(config), /do-not-print|secret-value/i);
   });

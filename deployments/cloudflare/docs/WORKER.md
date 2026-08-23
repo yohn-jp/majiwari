@@ -1,11 +1,11 @@
 # Cloudflare Worker
 
-The Worker is the only public entry point. `/mcp` sits behind Cloudflare Access Managed OAuth and proxies to the gateway's Tunnel origin. It never exposes the gateway's hostname to a client.
+The Worker is the only public entry point. `/mcp` sits behind Cloudflare Access Managed OAuth and proxies to the gateway over a Workers VPC Service binding. It never exposes the gateway's address to a client, and the proxy hop never touches the public zone's DNS or WAF -- see [`../terraform/README.md`](../terraform/README.md) for why this replaced the earlier Tunnel-hostname-plus-service-token design.
 
 ## Prerequisites
 
-- [`TUNNEL.md`](TUNNEL.md) completed: a Named Tunnel hostname protected by Cloudflare Access
-- the `/mcp` Managed OAuth Access Application provisioned via [`../terraform/access.tf`](../terraform/access.tf) (`terraform apply` with `public_mcp_hostname` set; see [`../terraform/README.md`](../terraform/README.md))
+- [`TUNNEL.md`](TUNNEL.md) completed: a Named Tunnel running the gateway
+- the `/mcp` Managed OAuth Access Application and the Workers VPC Service both provisioned via [`../terraform/access.tf`](../terraform/access.tf) (`terraform apply` with `public_mcp_hostname` and `gateway_tunnel_id` set; see [`../terraform/README.md`](../terraform/README.md))
 - a Cloudflare account, `wrangler` authenticated (`npx wrangler login`)
 - Node.js 20+
 
@@ -22,7 +22,7 @@ Fill these non-secret values in `deployment-profile.local.json`:
 
 - `accountId`: Cloudflare account ID
 - `publicMcpUrl`: public Worker MCP endpoint, with the exact `/mcp` path
-- `gatewayOrigin`: Tunnel origin, also with the exact `/mcp` path
+- `gatewayVpcServiceId`: the Workers VPC Service's ID (`terraform output -raw gateway_vpc_service_id` in [`../terraform/`](../terraform/))
 - `mcpAccess.teamDomain`: Cloudflare Access team domain, for example `https://<team-name>.cloudflareaccess.com`
 - `mcpAccess.audience`: the `/mcp` Access Application's audience tag (`terraform output -raw mcp_access_audience_tag` in [`../terraform/`](../terraform/))
 
@@ -37,37 +37,18 @@ npm --workspace @majiwari/worker run preflight -- \
   --profile deployments/cloudflare/deployment-profile.local.json
 ```
 
-Preflight rejects missing values, placeholders, malformed URLs, non-`/mcp` paths, a public URL equal to the Tunnel origin, and missing required secret bindings. Diagnostics print configuration status and binding names only; secret values are never read or printed.
+Preflight rejects missing values, placeholders, malformed URLs, and a non-`/mcp` public path. Diagnostics print configuration status only; the profile carries no secret values, so none are ever read or printed.
 
-## 3. Provision secret bindings
-
-Service credentials belong in Wrangler secrets, not in the profile or any tracked/generated configuration. The profile requires the `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` bindings, authenticating the Worker to the Tunnel-protected gateway origin. Their values come from the Terraform outputs described in [`TUNNEL.md`](TUNNEL.md). Generate the profile-specific Wrangler config, then provision the values interactively:
-
-```bash
-npm --workspace @majiwari/worker run deploy -- \
-  --profile deployments/cloudflare/deployment-profile.local.json \
-  --dry-run
-
-cd deployments/cloudflare/worker
-npx wrangler secret put GATEWAY_ACCESS_CLIENT_ID \
-  --config wrangler.profile.generated.jsonc
-npx wrangler secret put GATEWAY_ACCESS_CLIENT_SECRET \
-  --config wrangler.profile.generated.jsonc
-cd ../../..
-```
-
-`wrangler.profile.generated.jsonc` contains only profile values and secret binding names. It is ignored by Git. `wrangler secret put` sends each secret to Cloudflare; no secret value is written to the repository. `GATEWAY_ACCESS_CLIENT_SECRET` is accepted only by the upstream request and is never exposed to the MCP client.
-
-## 4. Deploy
+## 3. Deploy
 
 ```bash
 npm --workspace @majiwari/worker run deploy -- \
   --profile deployments/cloudflare/deployment-profile.local.json
 ```
 
-The deploy wrapper validates the profile, generates an ignored temporary Wrangler config, and invokes `wrangler deploy`. Repeating this command from a clean checkout uses the same profile and requires no source edits.
+The deploy wrapper validates the profile, generates an ignored temporary Wrangler config (with the `vpc_services` binding wired to `gatewayVpcServiceId`), and invokes `wrangler deploy`. Repeating this command from a clean checkout uses the same profile and requires no source edits. There is no Wrangler secret to provision for the gateway path -- the VPC Service binding is scoped to this Worker at creation time in Terraform, so there is no origin-side credential to put in Wrangler secrets or rotate.
 
-## 5. Verify
+## 4. Verify
 
 The `mcp`-type Access Application's `domain` covers the whole public hostname, not just `/mcp` -- so `/health` is also behind the Managed OAuth boundary once deployed with a custom domain, even though the Worker's own code (`src/index.ts`) would answer `/health` without checking the Access assertion:
 
@@ -86,8 +67,8 @@ See [`OAUTH.md`](OAUTH.md) for the full Managed OAuth flow and how the Worker va
 
 ## Secrets and configuration
 
-- `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` are Wrangler secrets provisioned in step 3, authenticating the Worker to the Tunnel-protected gateway origin (the origin protection boundary). They are not present in the profile, repository files, or Worker responses.
-- `MCP_ACCESS_TEAM_DOMAIN` and `MCP_ACCESS_AUDIENCE` (from the profile's `mcpAccess`) belong to a separate boundary: they are not secrets in the `wrangler secret put` sense -- Cloudflare Access authenticates the caller and the Worker only validates its assertion against them. Never collapse this boundary with the origin protection boundary above; they protect different hops and use independent Access Applications.
+- `GATEWAY_VPC` is a Workers VPC Service binding, not a secret -- it is wired up from the profile's `gatewayVpcServiceId` at deploy time and carries no credential value. The binding itself is the authorization: only this Worker can call `env.GATEWAY_VPC.fetch()` against the VPC Service it was bound to.
+- `MCP_ACCESS_TEAM_DOMAIN` and `MCP_ACCESS_AUDIENCE` (from the profile's `mcpAccess`) belong to a separate boundary: they are not secrets in the `wrangler secret put` sense -- Cloudflare Access authenticates the caller and the Worker only validates its assertion against them.
 - Tunnel credentials stay on the local machine and never enter the profile.
-- `GATEWAY_ORIGIN` is non-secret deployment configuration, supplied through the local profile. Review it before publishing a fork; it does not replace the Worker Access secrets. Never commit a filled-in `deployment-profile.local.json` or generated Wrangler config from a shared/production account into a public fork without checking your organization's disclosure policy for resource IDs; an audience tag alone does not grant access without account credentials.
-- If a future auth provider is added, store its client secret with `npx wrangler secret put <NAME>` and list the binding name in the profile's `secretBindings`.
+- `gatewayVpcServiceId` is non-secret deployment configuration, supplied through the local profile. Never commit a filled-in `deployment-profile.local.json` or generated Wrangler config from a shared/production account into a public fork without checking your organization's disclosure policy for resource IDs; a service ID or audience tag alone does not grant access without account credentials.
+- If a future auth provider is added, store its client secret with `npx wrangler secret put <NAME>` and list its `required` binding name in `wrangler.jsonc`'s `secrets` field.

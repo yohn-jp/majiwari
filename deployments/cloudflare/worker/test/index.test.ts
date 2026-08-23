@@ -7,9 +7,7 @@ import worker, { type Env } from "../src/index";
 
 function environment(overrides: Partial<Env> = {}): Env {
   return {
-    GATEWAY_ORIGIN: "https://gateway.example/mcp",
-    GATEWAY_ACCESS_CLIENT_ID: "worker-client-id",
-    GATEWAY_ACCESS_CLIENT_SECRET: "worker-client-secret",
+    GATEWAY_VPC: { fetch: vi.fn() } as unknown as Fetcher,
     MCP_ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
     MCP_ACCESS_AUDIENCE: "mcp-audience",
     ...overrides
@@ -43,31 +41,27 @@ describe("/mcp", () => {
 
   it("denies the request when Cloudflare Access rejects or omits the assertion", async () => {
     vi.mocked(verifyAccessAssertion).mockResolvedValue(null);
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const env = environment();
 
-    const response = await handle(new Request("https://mcp.example/mcp"), environment());
+    const response = await handle(new Request("https://mcp.example/mcp"), env);
 
     expect(response.status).toBe(403);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
+    expect(env.GATEWAY_VPC.fetch).not.toHaveBeenCalled();
   });
 
-  it("forwards an authenticated request to the gateway origin over the protected Tunnel", async () => {
+  it("forwards an authenticated request to the gateway over the Workers VPC Service binding", async () => {
     vi.mocked(verifyAccessAssertion).mockResolvedValue({ subject: "user-subject", email: "user@example.com" });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
+    const env = environment();
+    vi.mocked(env.GATEWAY_VPC.fetch).mockResolvedValue(new Response("ok", { status: 200 }));
 
     const response = await handle(
       new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": "assertion-token" } }),
-      environment()
+      env
     );
 
     expect(response.status).toBe(200);
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [target, init] = fetchSpy.mock.calls[0];
-    expect(target.toString()).toBe("https://gateway.example/mcp");
-    const headers = init?.headers as Headers;
-    expect(headers.get("cf-access-client-id")).toBe("worker-client-id");
-    expect(headers.get("cf-access-client-secret")).toBe("worker-client-secret");
-    fetchSpy.mockRestore();
+    expect(env.GATEWAY_VPC.fetch).toHaveBeenCalledOnce();
+    const [target] = vi.mocked(env.GATEWAY_VPC.fetch).mock.calls[0];
+    expect((target as Request).toString()).toBe("http://127.0.0.1:8787/mcp");
   });
 });

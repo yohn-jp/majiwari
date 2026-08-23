@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 
 export const WORKER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DEFAULT_PROFILE_PATH = path.resolve(WORKER_DIR, "..", "deployment-profile.local.json");
-export const ORIGIN_ACCESS_ID_BINDING = "GATEWAY_ACCESS_CLIENT_ID";
-export const ORIGIN_ACCESS_SECRET_BINDING = "GATEWAY_ACCESS_CLIENT_SECRET";
+export const GATEWAY_VPC_BINDING = "GATEWAY_VPC";
 
 export function resolveProfilePath(value) {
   if (path.isAbsolute(value)) return value;
@@ -15,11 +14,10 @@ export function resolveProfilePath(value) {
   return path.resolve(WORKER_DIR, "../../..", value);
 }
 
-const PROFILE_FIELDS = new Set(["accountId", "publicMcpUrl", "gatewayOrigin", "mcpAccess", "secretBindings"]);
+const PROFILE_FIELDS = new Set(["accountId", "publicMcpUrl", "gatewayVpcServiceId", "mcpAccess"]);
 const MCP_ACCESS_FIELDS = new Set(["teamDomain", "audience"]);
 const PLACEHOLDER_PATTERN = /REPLACE_WITH|CHANGE_ME|YOUR(?:[-_ ]|$)|<[^>]+>|example\.(?:com|net|org|invalid)/i;
 const SECRET_KEY_PATTERN = /(?:secret|password|token|private.?key|credential|api.?key)/i;
-const BINDING_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 const CLOUDFLARE_ID_PATTERN = /^[0-9a-f]{32}$/i;
 
 export class ProfileValidationError extends Error {
@@ -117,26 +115,12 @@ function validateMcpAccess(mcpAccess, errors) {
   if (audience && isPlaceholder(audience)) errors.push("mcpAccess.audience contains a placeholder");
 }
 
-function validateSecretBindings(value, errors) {
-  if (!Array.isArray(value) || value.length === 0) {
-    errors.push("secretBindings must list at least one Wrangler secret binding");
+function validateGatewayVpcServiceId(value, errors) {
+  if (typeof value !== "string" || value.trim() === "") {
+    errors.push("gatewayVpcServiceId is required");
     return;
   }
-  const bindings = new Set();
-  for (const binding of value) {
-    if (typeof binding !== "string" || !BINDING_PATTERN.test(binding)) {
-      errors.push("secretBindings must contain uppercase Wrangler binding names only");
-      continue;
-    }
-    if (bindings.has(binding)) errors.push(`secretBindings contains duplicate binding ${binding}`);
-    bindings.add(binding);
-  }
-  if (!bindings.has(ORIGIN_ACCESS_ID_BINDING)) {
-    errors.push(`secretBindings must include ${ORIGIN_ACCESS_ID_BINDING}`);
-  }
-  if (!bindings.has(ORIGIN_ACCESS_SECRET_BINDING)) {
-    errors.push(`secretBindings must include ${ORIGIN_ACCESS_SECRET_BINDING}`);
-  }
+  if (isPlaceholder(value)) errors.push("gatewayVpcServiceId contains a placeholder");
 }
 
 function validateNoSecretValues(value, field = "profile") {
@@ -168,14 +152,10 @@ export function validateDeploymentProfile(profile) {
   const accountId = requiredString(profile, "accountId", errors);
   if (accountId) validateCloudflareId(accountId, "accountId", errors);
 
-  const publicMcpUrl = parseMcpUrl(profile.publicMcpUrl, "publicMcpUrl", errors);
-  const gatewayOrigin = parseMcpUrl(profile.gatewayOrigin, "gatewayOrigin", errors);
-  if (publicMcpUrl && gatewayOrigin && publicMcpUrl.origin === gatewayOrigin.origin) {
-    errors.push("public-resource/origin mismatch: publicMcpUrl and gatewayOrigin must use different origins");
-  }
+  parseMcpUrl(profile.publicMcpUrl, "publicMcpUrl", errors);
+  validateGatewayVpcServiceId(profile.gatewayVpcServiceId, errors);
 
   validateMcpAccess(profile.mcpAccess, errors);
-  validateSecretBindings(profile.secretBindings, errors);
 
   if (errors.length > 0) throw new ProfileValidationError(errors);
   return profile;
@@ -203,11 +183,10 @@ export function buildWranglerConfig(baseConfig, profile) {
   config.account_id = profile.accountId;
   config.vars = {
     ...(config.vars ?? {}),
-    GATEWAY_ORIGIN: profile.gatewayOrigin,
     MCP_ACCESS_TEAM_DOMAIN: profile.mcpAccess.teamDomain,
     MCP_ACCESS_AUDIENCE: profile.mcpAccess.audience
   };
-  config.secrets = { required: [...profile.secretBindings] };
+  config.vpc_services = [{ binding: GATEWAY_VPC_BINDING, service_id: profile.gatewayVpcServiceId }];
   config.routes = [{ pattern: new URL(profile.publicMcpUrl).hostname, custom_domain: true }];
   return config;
 }
@@ -215,10 +194,9 @@ export function buildWranglerConfig(baseConfig, profile) {
 export function safeProfileSummary(profile) {
   return [
     `publicMcpUrl: ${profile.publicMcpUrl}`,
-    `gatewayOrigin: ${profile.gatewayOrigin}`,
+    "gatewayVpcServiceId: configured",
     "accountId: configured",
     "mcpAccess.teamDomain: configured",
-    "mcpAccess.audience: configured",
-    `secretBindings: ${profile.secretBindings.join(", ")}`
+    "mcpAccess.audience: configured"
   ].join("\n");
 }
