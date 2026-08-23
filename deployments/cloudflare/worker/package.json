@@ -6,9 +6,10 @@
   "description": "Cloudflare Worker: public /mcp entry point, OAuth enforcement, and proxy to the Majiwari gateway over a Named Tunnel.",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "preflight": "node scripts/doctor.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/profile.test.mjs",
     "check": "npm run typecheck"
   },
   "dependencies": {

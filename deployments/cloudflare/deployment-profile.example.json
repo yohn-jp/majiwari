@@ -1,0 +1,12 @@
+{
+  "accountId": "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID",
+  "publicMcpUrl": "https://mcp.example.com/mcp",
+  "gatewayOrigin": "https://majiwari-gateway.internal.example.com/mcp",
+  "oauthKvNamespaceId": "REPLACE_WITH_OAUTH_KV_NAMESPACE_ID",
+  "operatorAccess": {
+    "teamDomain": "https://REPLACE_WITH_TEAM_NAME.cloudflareaccess.com",
+    "audience": "REPLACE_WITH_CLOUDFLARE_ACCESS_AUDIENCE",
+    "operatorEmail": "REPLACE_WITH_OPERATOR_EMAIL"
+  },
+  "secretBindings": ["GATEWAY_ACCESS_CLIENT_ID", "GATEWAY_ACCESS_CLIENT_SECRET"]
+}

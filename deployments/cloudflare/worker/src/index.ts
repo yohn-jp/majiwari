@@ -10,6 +10,7 @@ import {
   parseConsentForm,
   renderConsentPage
 } from "./consent";
+import { RESOURCE_METADATA } from "./deployment";
 import { buildProxyTarget, filterHeaders, withServiceToken } from "./proxy";
 import { isPublicRoute } from "./routes";
 
@@ -185,14 +186,7 @@ export default new OAuthProvider<Env>({
 
   scopesSupported: ["mcp:invoke"],
 
-  // resourceMetadata is fixed at deploy time (the OAuthProvider constructor
-  // runs at module load, before any request's env is available). Replace
-  // both URLs with this Worker's actual public hostname before deploying --
-  // see deployments/cloudflare/docs/WORKER.md.
-  resourceMetadata: {
-    resource: "https://mcp.majiwari.example/mcp",
-    authorization_servers: ["https://mcp.majiwari.example"],
-    scopes_supported: ["mcp:invoke"],
-    resource_name: "Majiwari MCP gateway"
-  }
+  // OAuthProvider is constructed at module load, so the profile-driven
+  // build-time value is used instead of request-time env.
+  resourceMetadata: RESOURCE_METADATA
 });
