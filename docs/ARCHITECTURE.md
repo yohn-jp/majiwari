@@ -52,7 +52,7 @@ adapters/open-code-review/  (deterministic MCP tools wrapping the ocr CLI)
       target Git checkout
 ```
 
-The gateway bridges two MCP `Transport` instances directly at the `send`/`onmessage` level (see `gateway/src/server.js`) rather than parsing and re-emitting tool calls through a high-level MCP `Server`/`Client`. This is what makes "the gateway never changes a tool name, schema, or result" a structural property of the code, not just a convention to remember.
+The gateway is [mcp-proxy](https://github.com/punkpeye/mcp-proxy) (see `gateway/bin/gateway.mjs`, a thin CLI wrapper), which bridges the spawned stdio MCP server to Streamable HTTP at the transport level rather than parsing and re-emitting tool calls through a high-level MCP `Server`/`Client`. This is what makes "the gateway never changes a tool name, schema, or result" a structural property of the code, not just a convention to remember. This repository does not hand-roll transport bridging: an earlier hand-rolled bridge crashed the whole gateway process on an unhandled rejection whenever a client's connection closed before the stdio child's response arrived.
 
 ## Security boundary
 

@@ -9,7 +9,7 @@ The Worker reaches the gateway over this Tunnel via a **Workers VPC Service** bi
 - a Cloudflare account with a zone (domain) you control
 - `cloudflared` installed locally
 - Terraform 1.5 or newer
-- the Majiwari gateway running locally (see [`gateway/README` usage](../../../gateway) or `npm run gateway -- --port 8787 -- node /absolute/path/to/majiwari/adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository` -- the target script path must be absolute, since `npm run gateway` runs from the `gateway/` workspace directory, not the repo root)
+- the Majiwari gateway running locally (see [`gateway/`](../../../gateway) or `npm run gateway -- --port 8787 -- node /absolute/path/to/majiwari/adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository` -- the target script path must be absolute, since `npm run gateway` runs from the `gateway/` workspace directory, not the repo root)
 
 ## 1. Authenticate
 
@@ -76,7 +76,7 @@ ingress:
   - service: http_status:404
 ```
 
-The `access` block must remain under this hostname's ingress rule. `cloudflared` uses it to validate the `Cf-Access-Jwt-Assertion` header for the protected route before proxying to the gateway. The port must match the gateway's `--port` (see `gateway/src/server.js`).
+The `access` block must remain under this hostname's ingress rule. `cloudflared` uses it to validate the `Cf-Access-Jwt-Assertion` header for the protected route before proxying to the gateway. The port must match the gateway's `--port` (see `gateway/bin/gateway.mjs`).
 
 Validate the ingress configuration before starting the tunnel. `--config` is a global flag and must come before the `tunnel` subcommand, not after it:
 
