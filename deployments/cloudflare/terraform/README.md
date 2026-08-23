@@ -23,10 +23,23 @@ See [`../docs/WORKER.md`](../docs/WORKER.md) for how the Worker actually
 reaches the gateway today.
 
 The Terraform provider reads `CLOUDFLARE_API_TOKEN` from the environment. The
-token needs `Access: Apps and Policies Write`, `Access: Service Tokens
-Write` (for the legacy rollback path), and `Cloudflare One Connector:
-cloudflared` — Edit (to create the VPC Service). Do not put it in a
-`.tfvars` file or command-line argument.
+token needs `Access: Apps Write`, `Access: Policies Write`, `Access: Service
+Tokens Write` (for the legacy rollback path), and `Connectivity Directory
+Admin` (to create the VPC Service). Do not put it in a `.tfvars` file or
+command-line argument.
+
+Prefer not minting a long-lived token with this much scope at all --
+[`../scripts/with-scoped-token.sh`](../scripts/with-scoped-token.sh) mints a
+short-lived (4-hour), exactly-scoped token from a standing token that only
+needs `Account API Tokens` Edit, runs one command with it, and revokes it on
+exit:
+
+```bash
+export CLOUDFLARE_API_TOKEN='<standing token, Account API Tokens Edit only>'
+../scripts/with-scoped-token.sh <ACCOUNT_ID> \
+  "Access: Apps Write,Access: Policies Write,Access: Service Tokens Write,Connectivity Directory Admin" \
+  -- terraform apply -var='cloudflare_account_id=<ACCOUNT_ID>' ...
+```
 
 ## One-time API-token bootstrap
 
@@ -41,28 +54,33 @@ For the first deployment, an account administrator should open the direct
 `Create Token` → `Custom token`, restrict the token to the target account, and
 grant, account-scoped, all four of:
 
-- `Access: Policies` — Edit
-- `Access: Apps` — Edit
-- `Zero Trust` — Edit
-- `Cloudflare One コネクタ: Cloudflared` (`Cloudflare One Connector: cloudflared`) — Edit
+- `Access: Policies Write`
+- `Access: Apps Write`
+- `Access: Service Tokens Write`
+- `Connectivity Directory Admin`
 
-`Access: Apps` and `Access: Policies` alone are not sufficient: creating a
-Service Token (`POST .../access/service_tokens`, used by
-`cloudflare_zero_trust_access_service_token`) fails with `403 auth.forbidden`
-without the account-scoped `Zero Trust` permission group too, even when the
-token owner is a Super Administrator on the account. There is no separate
-`Access: Service Tokens` entry in the permission picker despite what the
-Cloudflare docs describe.
+Permission group names are account-specific and can change as Cloudflare
+ships permission-picker updates; if a name here doesn't match what the
+picker shows, list this account's actual names before guessing:
 
-`Cloudflare One Connector: cloudflared` is required separately to create the
-Workers VPC Service (`cloudflare_connectivity_directory_service.gateway`),
-which references a cloudflared Tunnel by ID. This is the permission group
-name the token picker actually shows for this account; it is not called
-`Connectivity Directory Admin` in the UI despite that name appearing in some
-Cloudflare API/Terraform documentation for the underlying role. Workers VPC
-is a beta product as of this writing, so double-check the permission
-picker's exact wording against the account in use if token creation fails
-with a scope error here.
+```bash
+curl -sS "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/tokens/permission_groups" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq -r '.result[].name'
+```
+
+`Access: Service Tokens Write` is required to create a Service Token (`POST
+.../access/service_tokens`, used by
+`cloudflare_zero_trust_access_service_token`). `Connectivity Directory
+Admin` is required separately to create the Workers VPC Service
+(`cloudflare_connectivity_directory_service.gateway`), which references a
+cloudflared Tunnel by ID. Workers VPC is a beta product as of this writing,
+so double-check the permission picker's exact wording against the account in
+use if token creation fails with a scope error here.
+
+Only this one-time bootstrap token needs to carry all four permissions, and
+only long enough to run `terraform apply` once or twice by hand. For repeat
+or automated applies, mint it as a short-lived scoped token instead of a
+long-lived one -- see `with-scoped-token.sh` above.
 
 Inject the resulting value into the shell or CI secret store that runs
 Terraform. Never paste it into chat, a profile, `.tfvars`, Terraform state
@@ -101,9 +119,9 @@ terraform apply \
 `mcp_access_allowed_email_domains` defaults to an empty list, which allows
 everyone available through the account's configured identity provider(s) —
 narrow it for anything beyond local testing. Creating an `mcp`-type Access
-application requires the same account-scoped `Zero Trust` and `Access: Apps`
-/ `Access: Policies` Edit permissions as above; Cloudflare has not published a
-narrower permission specific to MCP applications as of this writing.
+application requires the same `Access: Apps Write` / `Access: Policies
+Write` permissions as above; Cloudflare has not published a narrower
+permission specific to MCP applications as of this writing.
 
 `mcp_access_allowed_redirect_uris` defaults to an empty list. Without it, the
 `/mcp` Managed OAuth boundary's dynamic client registration rejects every

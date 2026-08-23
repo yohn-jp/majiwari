@@ -44,7 +44,7 @@ Run [`deployments/cloudflare/terraform`](../terraform/README.md) with the Tunnel
 - a Workers VPC Service (`cloudflare_connectivity_directory_service.gateway`) pointed at `127.0.0.1:8787` over this Tunnel -- this is what the Worker actually binds to
 - (legacy, unused by the Worker) a self-hosted Cloudflare Access application for the Tunnel hostname, a dedicated Service Token, and a `non_identity` Service Auth policy
 
-The Terraform API token needs `Access: Apps and Policies Write`, `Access: Service Tokens Write` (for the legacy resources), and `Cloudflare One Connector: cloudflared` — Edit (to create the VPC Service; see [`../terraform/README.md`](../terraform/README.md) for the exact permission picker naming). Keep Terraform state encrypted or remote.
+The Terraform API token needs `Access: Apps Write`, `Access: Policies Write`, `Access: Service Tokens Write` (for the legacy resources), and `Connectivity Directory Admin` (to create the VPC Service; see [`../terraform/README.md`](../terraform/README.md) for how to list this account's exact permission group names, and for `with-scoped-token.sh`, which mints this as a short-lived token instead of a standing one). Keep Terraform state encrypted or remote.
 
 Copy the VPC Service's ID into the deployment profile:
 
