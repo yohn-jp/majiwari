@@ -50,4 +50,4 @@ For MCP Inspector, configure the deployed Worker as the MCP URL, start the Inspe
 
 ## Secrets
 
-Cloudflare Access configuration contains no client secret in this Worker. `OAUTH_KV` holds the provider's clients, grants, and tokens plus the Worker's short-lived consent state. Nothing OAuth-related is committed to this repository.
+Cloudflare Access configuration contains no client secret in this Worker. `OAUTH_KV` holds the provider's clients, grants, and tokens. `CONSENT_STATE` holds the Worker's short-lived consent state and atomically consumes each state through Durable Object storage transactions. Nothing OAuth-related is committed to this repository.

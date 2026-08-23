@@ -14,23 +14,7 @@ vi.mock("../src/access", () => ({ authenticateOperator: vi.fn() }));
 
 import { authenticateOperator } from "../src/access";
 import { defaultHandler } from "../src/index";
-
-class MemoryKV {
-  private readonly values = new Map<string, string>();
-
-  async put(key: string, value: string): Promise<void> {
-    this.values.set(key, value);
-  }
-
-  async get<T>(key: string, type: "json"): Promise<T | null> {
-    const value = this.values.get(key);
-    return value ? (JSON.parse(value) as T) : null;
-  }
-
-  async delete(key: string): Promise<void> {
-    this.values.delete(key);
-  }
-}
+import { MemoryConsentNamespace } from "./consent-fixture";
 
 const oauthRequest: AuthRequest = {
   responseType: "code",
@@ -51,7 +35,8 @@ const client = {
 
 function environment(provider: Partial<OAuthHelpers> = {}) {
   return {
-    OAUTH_KV: new MemoryKV() as unknown as KVNamespace,
+    OAUTH_KV: {} as KVNamespace,
+    CONSENT_STATE: new MemoryConsentNamespace().asNamespace(),
     OAUTH_PROVIDER: {
       parseAuthRequest: vi.fn(async () => oauthRequest),
       lookupClient: vi.fn(async () => client),
@@ -117,6 +102,45 @@ describe("/authorize", () => {
     );
     expect(replayResponse.status).toBe(400);
     expect(provider.completeAuthorization).toHaveBeenCalledOnce();
+  });
+
+  it("allows only one concurrent approval to consume a consent state", async () => {
+    let releaseAuthorization!: () => void;
+    let markAuthorizationStarted!: () => void;
+    const authorizationStarted = new Promise<void>((resolve) => {
+      markAuthorizationStarted = resolve;
+    });
+    const authorizationRelease = new Promise<void>((resolve) => {
+      releaseAuthorization = resolve;
+    });
+    const completeAuthorization = vi.fn(async () => {
+      markAuthorizationStarted();
+      await authorizationRelease;
+      return { redirectTo: "https://client.example/callback?code=one&state=client-state" };
+    });
+    const env = environment({ completeAuthorization });
+    const getResponse = await handle(new Request("https://mcp.example/authorize"), env);
+    const fields = getConsentFields(await getResponse.text());
+    const cookie = getResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+    const post = () =>
+      handle(
+        new Request("https://mcp.example/authorize", {
+          method: "POST",
+          headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
+          body: `consent_state=${fields.state}&csrf_token=${fields.csrfToken}&decision=approve`
+        }),
+        env
+      );
+
+    const responses = Promise.all([post(), post()]);
+    await authorizationStarted;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(completeAuthorization).toHaveBeenCalledOnce();
+    releaseAuthorization();
+
+    const statuses = (await responses).map((response) => response.status).sort();
+    expect(statuses).toEqual([302, 400]);
+    expect(completeAuthorization).toHaveBeenCalledOnce();
   });
 
   it("rejects CSRF and denied consent without creating a grant", async () => {

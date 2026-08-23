@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
 import {
   CONSENT_COOKIE,
+  CONSENT_TTL_SECONDS,
   consumeConsentState,
   createConsentState,
   getConsentCookie,
@@ -10,23 +11,7 @@ import {
   parseConsentForm,
   renderConsentPage
 } from "../src/consent";
-
-class MemoryKV {
-  private readonly values = new Map<string, string>();
-
-  async put(key: string, value: string): Promise<void> {
-    this.values.set(key, value);
-  }
-
-  async get<T>(key: string, type: "json"): Promise<T | null> {
-    const value = this.values.get(key);
-    return value ? (JSON.parse(value) as T) : null;
-  }
-
-  async delete(key: string): Promise<void> {
-    this.values.delete(key);
-  }
-}
+import { MemoryConsentNamespace } from "./consent-fixture";
 
 const oauthRequest: AuthRequest = {
   responseType: "code",
@@ -41,25 +26,27 @@ const oauthRequest: AuthRequest = {
 
 const operator = { subject: "access-subject", email: "operator@example.com" };
 
-function kv(): KVNamespace {
-  return new MemoryKV() as unknown as KVNamespace;
+function namespace(): DurableObjectNamespace {
+  return new MemoryConsentNamespace().asNamespace();
 }
 
 describe("consent state", () => {
   it("stores the parsed OAuth request and consumes it once", async () => {
-    const store = kv();
+    const store = namespace();
     const created = await createConsentState(store, oauthRequest, operator);
 
     expect(created.state).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect(created.csrfToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
-    expect((await loadConsentState(store, created.state))?.request).toEqual(oauthRequest);
+    const loaded = await loadConsentState(store, created.state);
+    expect(loaded?.request).toEqual(oauthRequest);
+    expect(loaded?.expiresAt).toBeGreaterThan(Date.now() + (CONSENT_TTL_SECONDS - 1) * 1000);
 
-    await consumeConsentState(store, created.state);
+    expect(await consumeConsentState(store, created.state, created.csrfToken, operator)).not.toBeNull();
     expect(await loadConsentState(store, created.state)).toBeNull();
   });
 
   it("accepts only a matching form token, consent cookie, and operator identity", async () => {
-    const store = kv();
+    const store = namespace();
     const created = await createConsentState(store, oauthRequest, operator);
     const consent = await loadConsentState(store, created.state);
     if (!consent) throw new Error("consent state was not stored");
@@ -90,12 +77,17 @@ describe("consent state", () => {
   });
 
   it("rejects a tampered state record", async () => {
-    const store = new MemoryKV();
-    await store.put(
-      "oauth-consent-valid-state-with-enough-length-1234567890",
-      JSON.stringify({ state: "different-state", request: { clientId: "client" }, clientId: "client", operator, csrfToken: "token" })
+    const store = new MemoryConsentNamespace();
+    const state = "valid-state-with-enough-length-1234567890";
+    const response = await store.get(state).fetch(
+      new Request("https://consent/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "different-state", request: { clientId: "client" }, clientId: "client", operator, csrfToken: "token" })
+      })
     );
-    expect(await loadConsentState(store as unknown as KVNamespace, "valid-state-with-enough-length-1234567890")).toBeNull();
+    expect(response.status).toBe(400);
+    expect(await loadConsentState(store.asNamespace(), state)).toBeNull();
   });
 });
 

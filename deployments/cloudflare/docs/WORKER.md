@@ -18,6 +18,8 @@ npx wrangler kv namespace create OAUTH_KV
 
 Copy the printed `id` into `wrangler.jsonc`'s `kv_namespaces[0].id`, replacing `REPLACE_WITH_KV_NAMESPACE_ID`.
 
+`wrangler.jsonc` also binds `CONSENT_STATE` to `ConsentStateDurableObject` and includes its initial migration. The Durable Object stores each consent request separately and atomically consumes it; do not remove that binding or migration.
+
 ## 2. Point the Worker at the Tunnel origin
 
 Edit `wrangler.jsonc`'s `vars.GATEWAY_ORIGIN` to the Tunnel hostname from `TUNNEL.md`, including the `/mcp` path:
@@ -82,7 +84,7 @@ An unauthenticated request to `/mcp` must return `401` with a `WWW-Authenticate:
 
 ## Operator authentication and consent
 
-An authenticated Access request to `GET /authorize` validates the OAuth request and known client, then displays the client ID, client name, and requested scopes. The operator must submit an explicit `Approve` action. `POST /authorize` requires the one-use consent state, a CSRF token in both the form and an HttpOnly cookie, and the same Access subject that opened the page. `Deny` redirects with `access_denied` and creates no grant.
+An authenticated Access request to `GET /authorize` validates the OAuth request and known client, then displays the client ID, client name, and requested scopes. The operator must submit an explicit `Approve` action. `POST /authorize` requires the one-use consent state, a CSRF token in both the form and an HttpOnly cookie, and the same Access subject that opened the page. Durable Object storage transactionally consumes the state, so concurrent submissions can produce at most one grant. `Deny` redirects with `access_denied` and creates no grant.
 
 The OAuth Provider remains responsible for request validation, PKCE, authorization codes, access and refresh tokens, refresh-token rotation, DCR/CIMD, and bearer validation. This Worker only owns Access identity verification and consent.
 
@@ -90,6 +92,6 @@ The OAuth Provider remains responsible for request validation, PKCE, authorizati
 
 - `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` are Wrangler secrets created in step 3, authenticating the Worker to the Tunnel-protected gateway origin. They are not present in repository files or Worker responses.
 - `ACCESS_TEAM_DOMAIN`, `ACCESS_AUDIENCE`, and `OPERATOR_EMAIL` (step 5) are not secrets in the `wrangler secret put` sense -- Cloudflare Access authenticates the operator and the Worker only validates its assertion against them.
-- `OAUTH_KV` holds provider-managed state (registered clients, grants, and tokens) plus short-lived consent state, as a binding, not a secret value.
+- `OAUTH_KV` holds provider-managed state (registered clients, grants, and tokens) as a binding, not a secret value. `CONSENT_STATE` holds short-lived consent state in Durable Object storage, which atomically consumes it so concurrent submissions can produce at most one grant.
 - `GATEWAY_ORIGIN` and the KV namespace ID are deployment configuration. Review them before publishing a fork; neither replaces the Worker Access secrets. Never commit `wrangler.jsonc` with a filled-in KV namespace `id` from a shared/production account into a public fork without checking your organization's disclosure policy for resource IDs; the ID alone does not grant access without account credentials.
 - If a future auth provider is added, store its client secret with `npx wrangler secret put <NAME>`.

@@ -16,6 +16,22 @@
     }
   ],
 
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CONSENT_STATE",
+        "class_name": "ConsentStateDurableObject"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1-consent-state",
+      "new_sqlite_classes": ["ConsentStateDurableObject"]
+    }
+  ],
+
   "vars": {
     // Internal Tunnel-only origin for the gateway. Never expose this hostname
     // to clients. Replace with the actual cloudflared-issued hostname.

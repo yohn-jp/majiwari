@@ -13,9 +13,12 @@ import {
 import { buildProxyTarget, filterHeaders, withServiceToken } from "./proxy";
 import { isPublicRoute } from "./routes";
 
+export { ConsentStateDurableObject } from "./consent";
+
 export interface Env {
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: import("@cloudflare/workers-oauth-provider").OAuthHelpers;
+  CONSENT_STATE: DurableObjectNamespace;
   /** Tunnel-internal origin for the Majiwari gateway. Never exposed to clients. */
   GATEWAY_ORIGIN: string;
   /** Cloudflare Access service-token client ID. Provision with `wrangler secret put`. */
@@ -134,34 +137,34 @@ export const defaultHandler: ExportedHandler<Env> = {
       const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
       if (!client) return new Response("Unknown OAuth client", { status: 400 });
 
-      const consent = await createConsentState(env.OAUTH_KV, oauthRequest, operator);
+      const consent = await createConsentState(env.CONSENT_STATE, oauthRequest, operator);
       return renderConsentPage(client, oauthRequest.scope, consent.state, consent.csrfToken);
     }
 
     const form = await parseConsentForm(request);
     if (!form) return new Response("Invalid consent submission", { status: 400 });
 
-    const consent = await loadConsentState(env.OAUTH_KV, form.state);
+    const consent = await loadConsentState(env.CONSENT_STATE, form.state);
     if (!consent) return new Response("Invalid or expired consent state", { status: 400 });
     if (!isValidConsentSubmission(request, form, consent, operator)) return new Response("Invalid consent state", { status: 400 });
 
-    // Consume before either denial or grant completion. A submitted consent state is one-use.
-    await consumeConsentState(env.OAUTH_KV, form.state);
+    const consumedConsent = await consumeConsentState(env.CONSENT_STATE, form.state, form.csrfToken, operator);
+    if (!consumedConsent) return new Response("Invalid, expired, or already consumed consent state", { status: 400 });
 
     if (form.decision === "deny") {
-      const response = accessDeniedResponse(consent.request);
+      const response = accessDeniedResponse(consumedConsent.request);
       clearConsentCookie(response.headers);
       return response;
     }
 
-    const client = await env.OAUTH_PROVIDER.lookupClient(consent.clientId);
+    const client = await env.OAUTH_PROVIDER.lookupClient(consumedConsent.clientId);
     if (!client) return new Response("Unknown OAuth client", { status: 400 });
 
     const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
-      request: consent.request,
+      request: consumedConsent.request,
       userId: operatorUserId(operator.subject),
       metadata: { clientName: client.clientName, operatorEmail: operator.email },
-      scope: consent.request.scope,
+      scope: consumedConsent.request.scope,
       props: { userId: operatorUserId(operator.subject), operatorEmail: operator.email }
     });
 

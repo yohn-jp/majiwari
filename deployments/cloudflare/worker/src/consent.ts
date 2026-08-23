@@ -1,8 +1,11 @@
+import { DurableObject } from "cloudflare:workers";
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
 import type { OperatorIdentity } from "./access";
 
 export const CONSENT_COOKIE = "__Host-majiwari-consent";
 export const CONSENT_TTL_SECONDS = 600;
+
+const CONSENT_RECORD_KEY = "record";
 
 export interface ConsentState {
   state: string;
@@ -10,6 +13,14 @@ export interface ConsentState {
   clientId: string;
   operator: OperatorIdentity;
   csrfToken: string;
+  expiresAt: number;
+}
+
+interface ConsentConsumptionRequest {
+  state: string;
+  csrfToken: string;
+  operatorSubject: string;
+  operatorEmail: string;
 }
 
 function randomToken(): string {
@@ -20,44 +31,176 @@ function randomToken(): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function stateKey(state: string): string {
-  return `oauth-consent:${state}`;
+function isValidConsentState(value: unknown, expectedState?: string): value is ConsentState {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<ConsentState>;
+  if (
+    typeof record.state !== "string" ||
+    (expectedState !== undefined && record.state !== expectedState) ||
+    typeof record.clientId !== "string" ||
+    typeof record.csrfToken !== "string" ||
+    !Number.isFinite(record.expiresAt) ||
+    !record.request ||
+    !record.operator
+  ) {
+    return false;
+  }
+
+  const request = record.request as Partial<AuthRequest>;
+  const operator = record.operator as Partial<OperatorIdentity>;
+  return (
+    typeof request.responseType === "string" &&
+    typeof request.clientId === "string" &&
+    request.clientId === record.clientId &&
+    typeof request.redirectUri === "string" &&
+    typeof request.state === "string" &&
+    Array.isArray(request.scope) &&
+    request.scope.every((scope) => typeof scope === "string") &&
+    typeof operator.subject === "string" &&
+    typeof operator.email === "string"
+  );
 }
 
-export async function createConsentState(kv: KVNamespace, request: AuthRequest, operator: OperatorIdentity): Promise<{ state: string; csrfToken: string }> {
+function jsonError(status: number, message: string): Response {
+  return new Response(message, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+/**
+ * Durable Object that owns one consent state. `consume` uses a storage
+ * transaction so concurrent redemption requests cannot both observe a live
+ * record and complete authorization.
+ */
+export class ConsentStateDurableObject extends DurableObject {
+  async fetch(request: Request): Promise<Response> {
+    const path = new URL(request.url).pathname;
+
+    try {
+      if (request.method === "PUT" && path === "/state") {
+        const record = (await request.json()) as unknown;
+        if (!isValidConsentState(record) || record.expiresAt <= Date.now()) return jsonError(400, "Invalid consent state");
+
+        const created = await this.ctx.storage.transaction(async (transaction) => {
+          const existing = await transaction.get<ConsentState>(CONSENT_RECORD_KEY);
+          if (isValidConsentState(existing) && existing.expiresAt > Date.now()) return false;
+          if (existing) await transaction.delete(CONSENT_RECORD_KEY);
+          await transaction.put(CONSENT_RECORD_KEY, record);
+          return true;
+        });
+        if (!created) return jsonError(409, "Consent state already exists");
+
+        // Expiry is also checked in every read/consume transaction. The alarm
+        // only removes abandoned records after their ten-minute lifetime.
+        await this.ctx.storage.setAlarm(record.expiresAt);
+        return new Response(null, { status: 201 });
+      }
+
+      if (request.method === "GET" && path === "/state") {
+        const record = await this.ctx.storage.transaction(async (transaction) => {
+          const current = await transaction.get<ConsentState>(CONSENT_RECORD_KEY);
+          if (!isValidConsentState(current) || current.expiresAt <= Date.now()) {
+            if (current) await transaction.delete(CONSENT_RECORD_KEY);
+            return null;
+          }
+          return current;
+        });
+        return record ? Response.json(record, { headers: { "Cache-Control": "no-store" } }) : jsonError(404, "Consent state not found");
+      }
+
+      if (request.method === "POST" && path === "/consume") {
+        const consumption = (await request.json()) as Partial<ConsentConsumptionRequest>;
+        const record = await this.ctx.storage.transaction(async (transaction) => {
+          const current = await transaction.get<ConsentState>(CONSENT_RECORD_KEY);
+          if (!isValidConsentState(current) || current.expiresAt <= Date.now()) {
+            if (current) await transaction.delete(CONSENT_RECORD_KEY);
+            return null;
+          }
+          if (
+            consumption.state !== current.state ||
+            consumption.csrfToken !== current.csrfToken ||
+            consumption.operatorSubject !== current.operator.subject ||
+            consumption.operatorEmail !== current.operator.email
+          ) {
+            return null;
+          }
+
+          await transaction.delete(CONSENT_RECORD_KEY);
+          return current;
+        });
+        return record ? Response.json(record, { headers: { "Cache-Control": "no-store" } }) : jsonError(404, "Consent state not found");
+      }
+    } catch {
+      return jsonError(400, "Invalid consent state");
+    }
+
+    return jsonError(404, "Not found");
+  }
+
+  async alarm(): Promise<void> {
+    await this.ctx.storage.delete(CONSENT_RECORD_KEY);
+  }
+}
+
+function consentStub(namespace: DurableObjectNamespace, state: string): DurableObjectStub {
+  return namespace.get(namespace.idFromName(state));
+}
+
+async function responseConsentState(response: Response, expectedState: string): Promise<ConsentState | null> {
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`consent state operation failed: ${response.status}`);
+  const record = (await response.json()) as unknown;
+  return isValidConsentState(record, expectedState) ? record : null;
+}
+
+export async function createConsentState(
+  namespace: DurableObjectNamespace,
+  request: AuthRequest,
+  operator: OperatorIdentity
+): Promise<{ state: string; csrfToken: string }> {
   const state = randomToken();
   const csrfToken = randomToken();
-  const record: ConsentState = { state, request, clientId: request.clientId, operator, csrfToken };
-  await kv.put(stateKey(state), JSON.stringify(record), { expirationTtl: CONSENT_TTL_SECONDS });
+  const record: ConsentState = {
+    state,
+    request,
+    clientId: request.clientId,
+    operator,
+    csrfToken,
+    expiresAt: Date.now() + CONSENT_TTL_SECONDS * 1000
+  };
+  const response = await consentStub(namespace, state).fetch(
+    new Request("https://consent/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record)
+    })
+  );
+  if (!response.ok) throw new Error(`consent state creation failed: ${response.status}`);
   return { state, csrfToken };
 }
 
-export async function loadConsentState(kv: KVNamespace, state: string): Promise<ConsentState | null> {
+export async function loadConsentState(namespace: DurableObjectNamespace, state: string): Promise<ConsentState | null> {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(state)) return null;
-  const value = await kv.get(stateKey(state), "json");
-  if (!value || typeof value !== "object") return null;
-
-  const record = value as Partial<ConsentState>;
-  if (record.state !== state || !record.request || record.clientId !== record.request.clientId || !record.operator || !record.csrfToken) return null;
-  if (typeof record.csrfToken !== "string" || typeof record.operator.subject !== "string" || typeof record.operator.email !== "string") {
-    return null;
-  }
-  const request = record.request as Partial<AuthRequest>;
-  if (
-    typeof request.responseType !== "string" ||
-    typeof request.clientId !== "string" ||
-    typeof request.redirectUri !== "string" ||
-    typeof request.state !== "string" ||
-    !Array.isArray(request.scope) ||
-    request.scope.some((scope) => typeof scope !== "string")
-  ) {
-    return null;
-  }
-  return record as ConsentState;
+  return responseConsentState(await consentStub(namespace, state).fetch(new Request("https://consent/state")), state);
 }
 
-export async function consumeConsentState(kv: KVNamespace, state: string): Promise<void> {
-  await kv.delete(stateKey(state));
+/**
+ * Atomically validates the operator binding and removes the state. A null
+ * result means expired, invalid, or already consumed; callers must not grant.
+ */
+export async function consumeConsentState(
+  namespace: DurableObjectNamespace,
+  state: string,
+  csrfToken: string,
+  operator: OperatorIdentity
+): Promise<ConsentState | null> {
+  if (!/^[A-Za-z0-9_-]{40,}$/.test(state)) return null;
+  const response = await consentStub(namespace, state).fetch(
+    new Request("https://consent/consume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state, csrfToken, operatorSubject: operator.subject, operatorEmail: operator.email })
+    })
+  );
+  return responseConsentState(response, state);
 }
 
 export function getConsentCookie(request: Request): string | null {
