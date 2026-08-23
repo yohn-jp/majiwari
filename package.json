@@ -1,0 +1,19 @@
+{
+  "name": "open-code-review-chatgpt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ChatGPT host adapter for Alibaba OpenCodeReview Delegation Mode.",
+  "workspaces": [
+    "adapter"
+  ],
+  "scripts": {
+    "start": "npm --workspace adapter start --",
+    "test": "npm --workspace adapter test",
+    "check": "npm --workspace adapter run check",
+    "doctor": "npm --workspace adapter run doctor --"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
