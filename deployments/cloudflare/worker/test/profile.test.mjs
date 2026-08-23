@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   ORIGIN_ACCESS_ID_BINDING,
   ORIGIN_ACCESS_SECRET_BINDING,
-  PUBLIC_MCP_DEFINE,
   ProfileValidationError,
   buildWranglerConfig,
   safeProfileSummary,
@@ -14,21 +13,15 @@ const validProfile = {
   accountId: "0123456789abcdef0123456789abcdef",
   publicMcpUrl: "https://mcp.test/mcp",
   gatewayOrigin: "https://gateway.internal.test/mcp",
-  oauthKvNamespaceId: "abcdef0123456789abcdef0123456789",
-  operatorAccess: {
+  mcpAccess: {
     teamDomain: "https://majiwari.cloudflareaccess.com",
-    audience: "operator-access-audience",
-    operatorEmail: "operator@example.test"
+    audience: "mcp-access-audience"
   },
   secretBindings: [ORIGIN_ACCESS_ID_BINDING, ORIGIN_ACCESS_SECRET_BINDING]
 };
 
 const baseWranglerConfig = {
-  vars: { EXISTING: "kept" },
-  durable_objects: {
-    bindings: [{ name: "CONSENT_STATE", class_name: "ConsentStateDurableObject" }]
-  },
-  migrations: [{ tag: "v1-consent-state", new_sqlite_classes: ["ConsentStateDurableObject"] }]
+  vars: { EXISTING: "kept" }
 };
 
 function copyProfile(overrides = {}) {
@@ -43,9 +36,8 @@ describe("deployment profile validation", () => {
   it("rejects placeholders and malformed URLs", () => {
     assertInvalid({
       publicMcpUrl: "REPLACE_WITH_PUBLIC_URL",
-      gatewayOrigin: "http://gateway.example.invalid/not-mcp",
-      oauthKvNamespaceId: "REPLACE_WITH_KV_ID"
-    }, /placeholder|must use https|exact \/mcp path|32-character hexadecimal/);
+      gatewayOrigin: "http://gateway.example.invalid/not-mcp"
+    }, /placeholder|must use https|exact \/mcp path/);
   });
 
   it("rejects a public resource and Tunnel origin with the same origin", () => {
@@ -57,19 +49,15 @@ describe("deployment profile validation", () => {
     assertInvalid({ secretBindings: [ORIGIN_ACCESS_ID_BINDING] }, new RegExp(`secretBindings must include ${ORIGIN_ACCESS_SECRET_BINDING}`));
     assertInvalid({ secretBindings: [ORIGIN_ACCESS_SECRET_BINDING] }, new RegExp(`secretBindings must include ${ORIGIN_ACCESS_ID_BINDING}`));
     assertInvalid(
-      { operatorAccess: { ...validProfile.operatorAccess, clientSecret: "do-not-print" } },
+      { mcpAccess: { ...validProfile.mcpAccess, clientSecret: "do-not-print" } },
       /not a supported profile field/
     );
   });
 
-  it("requires the KV binding resource ID", () => {
-    assertInvalid({ oauthKvNamespaceId: undefined }, /oauthKvNamespaceId is required/);
-  });
-
-  it("keeps the operator-access boundary separate from origin-access secret bindings", () => {
-    assertInvalid({ operatorAccess: undefined }, /operatorAccess is required/);
-    assertInvalid({ operatorAccess: { ...validProfile.operatorAccess, teamDomain: "not-a-url" } }, /operatorAccess\.teamDomain must be a valid URL/);
-    assertInvalid({ operatorAccess: { ...validProfile.operatorAccess, operatorEmail: "not-an-email" } }, /operatorAccess\.operatorEmail must be a valid email address/);
+  it("keeps the /mcp Access boundary separate from origin-access secret bindings", () => {
+    assertInvalid({ mcpAccess: undefined }, /mcpAccess is required/);
+    assertInvalid({ mcpAccess: { ...validProfile.mcpAccess, teamDomain: "not-a-url" } }, /mcpAccess\.teamDomain must be a valid URL/);
+    assertInvalid({ mcpAccess: { ...validProfile.mcpAccess, audience: "" } }, /mcpAccess\.audience is required/);
   });
 });
 
@@ -77,20 +65,12 @@ describe("generated Wrangler configuration", () => {
   it("maps profile values without putting secret values into config", () => {
     const config = buildWranglerConfig(baseWranglerConfig, validProfile);
     strictEqual(config.account_id, validProfile.accountId);
-    deepStrictEqual(config.kv_namespaces, [{ binding: "OAUTH_KV", id: validProfile.oauthKvNamespaceId }]);
     strictEqual(config.vars.GATEWAY_ORIGIN, validProfile.gatewayOrigin);
-    strictEqual(config.vars.ACCESS_TEAM_DOMAIN, validProfile.operatorAccess.teamDomain);
-    strictEqual(config.vars.ACCESS_AUDIENCE, validProfile.operatorAccess.audience);
-    strictEqual(config.vars.OPERATOR_EMAIL, validProfile.operatorAccess.operatorEmail);
-    strictEqual(config.define[PUBLIC_MCP_DEFINE], JSON.stringify(validProfile.publicMcpUrl));
+    strictEqual(config.vars.MCP_ACCESS_TEAM_DOMAIN, validProfile.mcpAccess.teamDomain);
+    strictEqual(config.vars.MCP_ACCESS_AUDIENCE, validProfile.mcpAccess.audience);
+    strictEqual(config.vars.EXISTING, "kept");
     deepStrictEqual(config.secrets, { required: [ORIGIN_ACCESS_ID_BINDING, ORIGIN_ACCESS_SECRET_BINDING] });
     doesNotMatch(JSON.stringify(config), /do-not-print|secret-value/i);
-  });
-
-  it("preserves the CONSENT_STATE durable object binding and its migration from the base config", () => {
-    const config = buildWranglerConfig(baseWranglerConfig, validProfile);
-    deepStrictEqual(config.durable_objects, baseWranglerConfig.durable_objects);
-    deepStrictEqual(config.migrations, baseWranglerConfig.migrations);
   });
 });
 

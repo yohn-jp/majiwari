@@ -1,6 +1,6 @@
-/** True only for the two paths this Worker serves outside the OAuth-protected /mcp route. */
-export function isPublicRoute(pathname: string): "health" | "authorize" | "not-found" {
+/** Classifies each path this Worker serves: the health check, the Access-protected MCP endpoint, or nothing. */
+export function classifyRoute(pathname: string): "health" | "mcp" | "not-found" {
   if (pathname === "/health") return "health";
-  if (pathname === "/authorize") return "authorize";
+  if (pathname === "/mcp") return "mcp";
   return "not-found";
 }

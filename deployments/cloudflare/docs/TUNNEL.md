@@ -98,7 +98,7 @@ curl -i -X POST https://majiwari-gateway.internal.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-06-18","capabilities":{},"clientInfo":{"name":"curl-check","version":"0.0.0"}}}'
 ```
 
-Expect HTTP `401` or `403`; the request must not reach the local gateway. A request with only the Worker's configured Service Token is the authorized origin path, and the Worker supplies that token server-side. End-user traffic must go through the Worker's OAuth-protected `/mcp`, not this hostname directly. Verify that path with the same MCP request and an OAuth access token:
+Expect HTTP `401` or `403`; the request must not reach the local gateway. A request with only the Worker's configured Service Token is the authorized origin path, and the Worker supplies that token server-side. End-user traffic must go through the Worker's Managed-OAuth-protected `/mcp`, not this hostname directly (see [`OAUTH.md`](OAUTH.md)). Verify that path with the same MCP request and a Cloudflare Access-issued token:
 
 ```bash
 curl -i -X POST https://<worker-hostname>/mcp \
@@ -108,7 +108,7 @@ curl -i -X POST https://<worker-hostname>/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-06-18","capabilities":{},"clientInfo":{"name":"curl-check","version":"0.0.0"}}}'
 ```
 
-A successful MCP response confirms Worker OAuth, Service Token injection, and Tunnel Access validation are connected.
+A successful MCP response confirms the Worker's Managed OAuth boundary, Service Token injection, and Tunnel Access validation are all connected.
 
 ## Secrets
 

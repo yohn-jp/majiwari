@@ -13,3 +13,8 @@ output "worker_access_client_secret" {
   description = "Pipe directly into Wrangler secret GATEWAY_ACCESS_CLIENT_SECRET; do not print or commit."
   sensitive   = true
 }
+
+output "mcp_access_audience_tag" {
+  value       = cloudflare_zero_trust_access_application.mcp.aud
+  description = "Copy into deployment-profile.json's mcpAccess.audience value."
+}
