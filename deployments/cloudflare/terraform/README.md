@@ -1,10 +1,18 @@
 # Cloudflare Access provisioning
 
-This directory provisions the Access boundary for the Named Tunnel:
+This directory provisions two independent Access boundaries:
 
-- one dedicated Service Token for the Worker
-- one `non_identity` Service Auth policy that includes only that token
-- one self-hosted Access application for the Tunnel hostname
+- the private Tunnel origin (Worker → gateway): one dedicated Service Token,
+  one `non_identity` Service Auth policy that includes only that token, and
+  one self-hosted Access application for the Tunnel hostname
+- the public `/mcp` endpoint (client → Worker): one `mcp`-type Access
+  application with Managed OAuth enabled (`oauth_configuration.enabled =
+  true`), and an identity-based Access policy controlling which callers may
+  complete the OAuth grant
+
+These are separate applications protecting separate hops; the Managed OAuth
+boundary does not weaken or replace the Tunnel origin's Service Token
+protection.
 
 The Terraform provider reads `CLOUDFLARE_API_TOKEN` from the environment. The
 token needs `Access: Apps and Policies Write` and `Access: Service Tokens Write`.
@@ -49,22 +57,35 @@ into that worker's process environment; setting it in a separate local shell
 does not make it available to the worker. A preflight should stop with this
 instruction when the variable is absent.
 
-Initialize and apply with the account ID and exact Tunnel hostname:
+Initialize and apply with the account ID, the Tunnel hostname, and the public
+MCP hostname (the origin of `deployment-profile.json`'s `publicMcpUrl`):
 
 ```bash
 export CLOUDFLARE_API_TOKEN='…'
 terraform init
 terraform apply \
   -var='cloudflare_account_id=<ACCOUNT_ID>' \
-  -var='gateway_hostname=majiwari-gateway.internal.example.com'
+  -var='gateway_hostname=majiwari-gateway.internal.example.com' \
+  -var='public_mcp_hostname=mcp.example.com' \
+  -var='mcp_access_allowed_email_domains=["example.com"]'
 ```
+
+`mcp_access_allowed_email_domains` defaults to an empty list, which allows
+everyone available through the account's configured identity provider(s) —
+narrow it for anything beyond local testing. Creating an `mcp`-type Access
+application requires the same account-scoped `Zero Trust` and `Access: Apps`
+/ `Access: Policies` Edit permissions as above; Cloudflare has not published a
+narrower permission specific to MCP applications as of this writing.
 
 Terraform state contains the generated service-token secret. Use encrypted or
 remote state and never commit state files. The local `.gitignore` is a guard,
 not a replacement for protected state storage.
 
-Copy the audience tag into `deployments/cloudflare/tunnel/config.example.yml`,
-then provision Worker secrets without printing their values:
+Copy the Tunnel application's audience tag into
+`deployments/cloudflare/tunnel/config.example.yml`, and the `/mcp`
+application's audience tag (`terraform output -raw mcp_access_audience_tag`)
+into the deployment profile's `mcpAccess.audience`. Then provision Worker
+secrets without printing their values:
 
 ```bash
 cd deployments/cloudflare/worker

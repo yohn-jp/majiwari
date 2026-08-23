@@ -5,34 +5,11 @@
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["global_fetch_strictly_public"],
   "account_id": "REPLACE_WITH_PROFILE_ACCOUNT_ID",
-  "kv_namespaces": [
-    {
-      "binding": "OAUTH_KV",
-      "id": "REPLACE_WITH_PROFILE_KV_NAMESPACE_ID"
-    }
-  ],
-
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "CONSENT_STATE",
-        "class_name": "ConsentStateDurableObject"
-      }
-    ]
-  },
-
-  "migrations": [
-    {
-      "tag": "v1-consent-state",
-      "new_sqlite_classes": ["ConsentStateDurableObject"]
-    }
-  ],
 
   "vars": {
     "GATEWAY_ORIGIN": "REPLACE_WITH_PROFILE_GATEWAY_ORIGIN",
-    "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_PROFILE_ACCESS_TEAM_DOMAIN",
-    "ACCESS_AUDIENCE": "REPLACE_WITH_PROFILE_ACCESS_AUDIENCE",
-    "OPERATOR_EMAIL": "REPLACE_WITH_PROFILE_OPERATOR_EMAIL"
+    "MCP_ACCESS_TEAM_DOMAIN": "REPLACE_WITH_PROFILE_MCP_ACCESS_TEAM_DOMAIN",
+    "MCP_ACCESS_AUDIENCE": "REPLACE_WITH_PROFILE_MCP_ACCESS_AUDIENCE"
   },
   "secrets": {
     "required": ["GATEWAY_ACCESS_CLIENT_ID", "GATEWAY_ACCESS_CLIENT_SECRET"]

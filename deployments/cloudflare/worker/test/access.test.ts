@@ -1,10 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { authenticateOperator } from "../src/access";
+import { verifyAccessAssertion } from "../src/access";
 
 const environment = {
-  ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
-  ACCESS_AUDIENCE: "access-audience",
-  OPERATOR_EMAIL: "operator@example.com"
+  MCP_ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
+  MCP_ACCESS_AUDIENCE: "mcp-audience"
 };
 
 function encodeJson(value: unknown): string {
@@ -17,10 +16,10 @@ function encodeJson(value: unknown): string {
 async function signedAccessToken(privateKey: CryptoKey, claims: Record<string, unknown>): Promise<string> {
   const header = encodeJson({ alg: "RS256", kid: "access-key", typ: "JWT" });
   const payload = encodeJson({
-    iss: environment.ACCESS_TEAM_DOMAIN,
-    aud: [environment.ACCESS_AUDIENCE],
-    sub: "operator-subject",
-    email: "operator@example.com",
+    iss: environment.MCP_ACCESS_TEAM_DOMAIN,
+    aud: [environment.MCP_ACCESS_AUDIENCE],
+    sub: "user-subject",
+    email: "user@example.com",
     exp: Math.floor(Date.now() / 1000) + 300,
     ...claims
   });
@@ -36,7 +35,7 @@ async function signedAccessToken(privateKey: CryptoKey, claims: Record<string, u
   return `${signingInput}.${encodedSignature}`;
 }
 
-describe("authenticateOperator", () => {
+describe("verifyAccessAssertion", () => {
   let privateKey: CryptoKey;
   let publicJwk: JsonWebKey;
 
@@ -55,44 +54,48 @@ describe("authenticateOperator", () => {
     vi.unstubAllGlobals();
   });
 
-  it("accepts a valid Cloudflare Access assertion for the configured operator", async () => {
+  it("accepts a valid Cloudflare Access assertion scoped to the /mcp application", async () => {
     const token = await signedAccessToken(privateKey, {});
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [{ ...publicJwk, kid: "access-key", alg: "RS256" }] })));
 
-    const identity = await authenticateOperator(
-      new Request("https://mcp.example/authorize", { headers: { "Cf-Access-Jwt-Assertion": token } }),
+    const identity = await verifyAccessAssertion(
+      new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": token } }),
       environment
     );
 
-    expect(identity).toEqual({ subject: "operator-subject", email: "operator@example.com" });
+    expect(identity).toEqual({ subject: "user-subject", email: "user@example.com" });
   });
 
-  it("rejects missing, expired, wrong-audience, wrong-email, and tampered assertions", async () => {
+  it("trusts the Access Policy for who is allowed through: any verified identity with a claimed email passes", async () => {
+    const token = await signedAccessToken(privateKey, { email: "someone-else@example.com" });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [{ ...publicJwk, kid: "access-key", alg: "RS256" }] })));
+
+    const identity = await verifyAccessAssertion(
+      new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": token } }),
+      environment
+    );
+
+    expect(identity).toEqual({ subject: "user-subject", email: "someone-else@example.com" });
+  });
+
+  it("rejects missing, expired, wrong-audience, and tampered assertions", async () => {
     const fetchCertificates = vi.fn(async () => Response.json({ keys: [{ ...publicJwk, kid: "access-key", alg: "RS256" }] }));
     vi.stubGlobal("fetch", fetchCertificates);
 
-    expect(await authenticateOperator(new Request("https://mcp.example/authorize"), environment)).toBeNull();
+    expect(await verifyAccessAssertion(new Request("https://mcp.example/mcp"), environment)).toBeNull();
 
     const expired = await signedAccessToken(privateKey, { exp: Math.floor(Date.now() / 1000) - 1 });
     expect(
-      await authenticateOperator(
-        new Request("https://mcp.example/authorize", { headers: { "Cf-Access-Jwt-Assertion": expired } }),
+      await verifyAccessAssertion(
+        new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": expired } }),
         environment
       )
     ).toBeNull();
 
     const wrongAudience = await signedAccessToken(privateKey, { aud: "another-audience" });
     expect(
-      await authenticateOperator(
-        new Request("https://mcp.example/authorize", { headers: { "Cf-Access-Jwt-Assertion": wrongAudience } }),
-        environment
-      )
-    ).toBeNull();
-
-    const wrongEmail = await signedAccessToken(privateKey, { email: "other@example.com" });
-    expect(
-      await authenticateOperator(
-        new Request("https://mcp.example/authorize", { headers: { "Cf-Access-Jwt-Assertion": wrongEmail } }),
+      await verifyAccessAssertion(
+        new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": wrongAudience } }),
         environment
       )
     ).toBeNull();
@@ -101,11 +104,27 @@ describe("authenticateOperator", () => {
     const attacker = await signedAccessToken(privateKey, { sub: "attacker-subject" });
     const tampered = `${attacker.slice(0, attacker.lastIndexOf("."))}.${valid.slice(valid.lastIndexOf(".") + 1)}`;
     expect(
-      await authenticateOperator(
-        new Request("https://mcp.example/authorize", { headers: { "Cf-Access-Jwt-Assertion": tampered } }),
+      await verifyAccessAssertion(
+        new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": tampered } }),
         environment
       )
     ).toBeNull();
     expect(fetchCertificates).toHaveBeenCalled();
+  });
+
+  it("fails closed when Access configuration is incomplete", async () => {
+    const token = await signedAccessToken(privateKey, {});
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [{ ...publicJwk, kid: "access-key", alg: "RS256" }] })));
+
+    expect(
+      await verifyAccessAssertion(new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": token } }), {
+        MCP_ACCESS_TEAM_DOMAIN: environment.MCP_ACCESS_TEAM_DOMAIN
+      })
+    ).toBeNull();
+    expect(
+      await verifyAccessAssertion(new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": token } }), {
+        MCP_ACCESS_AUDIENCE: environment.MCP_ACCESS_AUDIENCE
+      })
+    ).toBeNull();
   });
 });

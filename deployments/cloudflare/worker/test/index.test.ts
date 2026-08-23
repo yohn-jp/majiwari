@@ -1,185 +1,73 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
-vi.mock("@cloudflare/workers-oauth-provider", () => ({
-  AuthorizationError: class AuthorizationError extends Error {
-    code = "invalid_request";
-    description = this.message;
-  },
-  OAuthProvider: class OAuthProvider {
-    constructor(_options: unknown) {}
-  }
-}));
-vi.mock("../src/access", () => ({ authenticateOperator: vi.fn() }));
+vi.mock("../src/access", () => ({ verifyAccessAssertion: vi.fn() }));
 
-import { authenticateOperator } from "../src/access";
-import { defaultHandler } from "../src/index";
-import { MemoryConsentNamespace } from "./consent-fixture";
+import { verifyAccessAssertion } from "../src/access";
+import worker, { type Env } from "../src/index";
 
-const oauthRequest: AuthRequest = {
-  responseType: "code",
-  clientId: "inspector-client",
-  redirectUri: "https://client.example/callback",
-  scope: ["mcp:invoke"],
-  state: "client-state",
-  codeChallenge: "challenge",
-  codeChallengeMethod: "S256"
-};
-
-const client = {
-  clientId: oauthRequest.clientId,
-  clientName: "MCP Inspector",
-  redirectUris: [oauthRequest.redirectUri],
-  tokenEndpointAuthMethod: "none"
-} satisfies ClientInfo;
-
-function environment(provider: Partial<OAuthHelpers> = {}) {
+function environment(overrides: Partial<Env> = {}): Env {
   return {
-    OAUTH_KV: {} as KVNamespace,
-    CONSENT_STATE: new MemoryConsentNamespace().asNamespace(),
-    OAUTH_PROVIDER: {
-      parseAuthRequest: vi.fn(async () => oauthRequest),
-      lookupClient: vi.fn(async () => client),
-      completeAuthorization: vi.fn(async () => ({ redirectTo: "https://client.example/callback?code=one&state=client-state" })),
-      ...provider
-    } as unknown as OAuthHelpers,
     GATEWAY_ORIGIN: "https://gateway.example/mcp",
-    ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
-    ACCESS_AUDIENCE: "audience",
-    OPERATOR_EMAIL: "operator@example.com"
+    GATEWAY_ACCESS_CLIENT_ID: "worker-client-id",
+    GATEWAY_ACCESS_CLIENT_SECRET: "worker-client-secret",
+    MCP_ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
+    MCP_ACCESS_AUDIENCE: "mcp-audience",
+    ...overrides
   };
 }
 
-function getConsentFields(body: string): { state: string; csrfToken: string } {
-  const state = body.match(/name="consent_state" value="([^"]+)"/)?.[1];
-  const csrfToken = body.match(/name="csrf_token" value="([^"]+)"/)?.[1];
-  if (!state || !csrfToken) throw new Error("consent fields missing");
-  return { state, csrfToken };
+function handle(request: Request, env: Env): Promise<Response> {
+  return Promise.resolve(worker.fetch!(request as never, env, {} as ExecutionContext));
 }
 
-function handle(request: Request, env: unknown): Promise<Response> {
-  return Promise.resolve(defaultHandler.fetch!(request as never, env as never, {} as ExecutionContext));
-}
+describe("routing", () => {
+  it("serves /health without requiring an Access assertion", async () => {
+    const response = await handle(new Request("https://mcp.example/health"), environment());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(verifyAccessAssertion).not.toHaveBeenCalled();
+  });
 
-describe("/authorize", () => {
+  it("returns 404 for every other path, including retired OAuth endpoints", async () => {
+    for (const path of ["/", "/authorize", "/oauth/token", "/oauth/register", "/.well-known/oauth-authorization-server"]) {
+      const response = await handle(new Request(`https://mcp.example${path}`), environment());
+      expect(response.status).toBe(404);
+    }
+  });
+});
+
+describe("/mcp", () => {
   beforeEach(() => {
-    vi.mocked(authenticateOperator).mockResolvedValue({ subject: "operator-subject", email: "operator@example.com" });
+    vi.mocked(verifyAccessAssertion).mockReset();
   });
 
-  it("shows consent on GET and completes only after an approved POST", async () => {
-    const env = environment();
-    const provider = env.OAUTH_PROVIDER as unknown as {
-      completeAuthorization: ReturnType<typeof vi.fn>;
-    };
+  it("denies the request when Cloudflare Access rejects or omits the assertion", async () => {
+    vi.mocked(verifyAccessAssertion).mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    const getResponse = await handle(new Request("https://mcp.example/authorize?code=oauth"), env);
-    const body = await getResponse.text();
-    const fields = getConsentFields(body);
-    expect(getResponse.status).toBe(200);
-    expect(body).toContain("MCP Inspector");
-    expect(body).toContain("mcp:invoke");
-    expect(provider.completeAuthorization).not.toHaveBeenCalled();
-
-    const cookie = getResponse.headers.get("Set-Cookie")?.split(";")[0];
-    const postResponse = await handle(
-      new Request("https://mcp.example/authorize", {
-        method: "POST",
-        headers: { Cookie: cookie ?? "", "Content-Type": "application/x-www-form-urlencoded" },
-        body: `consent_state=${fields.state}&csrf_token=${fields.csrfToken}&decision=approve`
-      }),
-      env as never
-    );
-    expect(postResponse.status).toBe(302);
-    expect(provider.completeAuthorization).toHaveBeenCalledOnce();
-
-    const replayResponse = await handle(
-      new Request("https://mcp.example/authorize", {
-        method: "POST",
-        headers: { Cookie: cookie ?? "", "Content-Type": "application/x-www-form-urlencoded" },
-        body: `consent_state=${fields.state}&csrf_token=${fields.csrfToken}&decision=approve`
-      }),
-      env as never
-    );
-    expect(replayResponse.status).toBe(400);
-    expect(provider.completeAuthorization).toHaveBeenCalledOnce();
-  });
-
-  it("allows only one concurrent approval to consume a consent state", async () => {
-    let releaseAuthorization!: () => void;
-    let markAuthorizationStarted!: () => void;
-    const authorizationStarted = new Promise<void>((resolve) => {
-      markAuthorizationStarted = resolve;
-    });
-    const authorizationRelease = new Promise<void>((resolve) => {
-      releaseAuthorization = resolve;
-    });
-    const completeAuthorization = vi.fn(async () => {
-      markAuthorizationStarted();
-      await authorizationRelease;
-      return { redirectTo: "https://client.example/callback?code=one&state=client-state" };
-    });
-    const env = environment({ completeAuthorization });
-    const getResponse = await handle(new Request("https://mcp.example/authorize"), env);
-    const fields = getConsentFields(await getResponse.text());
-    const cookie = getResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
-    const post = () =>
-      handle(
-        new Request("https://mcp.example/authorize", {
-          method: "POST",
-          headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
-          body: `consent_state=${fields.state}&csrf_token=${fields.csrfToken}&decision=approve`
-        }),
-        env
-      );
-
-    const responses = Promise.all([post(), post()]);
-    await authorizationStarted;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(completeAuthorization).toHaveBeenCalledOnce();
-    releaseAuthorization();
-
-    const statuses = (await responses).map((response) => response.status).sort();
-    expect(statuses).toEqual([302, 400]);
-    expect(completeAuthorization).toHaveBeenCalledOnce();
-  });
-
-  it("rejects CSRF and denied consent without creating a grant", async () => {
-    const env = environment();
-    const provider = env.OAUTH_PROVIDER as unknown as { completeAuthorization: ReturnType<typeof vi.fn> };
-    const getResponse = await handle(new Request("https://mcp.example/authorize"), env);
-    const fields = getConsentFields(await getResponse.text());
-    const cookie = getResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
-
-    const csrfResponse = await handle(
-      new Request("https://mcp.example/authorize", {
-        method: "POST",
-        headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
-        body: `consent_state=${fields.state}&csrf_token=wrong&decision=approve`
-      }),
-      env as never
-    );
-    expect(csrfResponse.status).toBe(400);
-    expect(provider.completeAuthorization).not.toHaveBeenCalled();
-
-    const denyResponse = await handle(
-      new Request("https://mcp.example/authorize", {
-        method: "POST",
-        headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
-        body: `consent_state=${fields.state}&csrf_token=${fields.csrfToken}&decision=deny`
-      }),
-      env as never
-    );
-    expect(denyResponse.status).toBe(302);
-    expect(new URL(denyResponse.headers.get("Location") ?? "").searchParams.get("error")).toBe("access_denied");
-    expect(provider.completeAuthorization).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when Access identity policy rejects the request", async () => {
-    vi.mocked(authenticateOperator).mockResolvedValue(null);
-    const env = environment();
-    const response = await handle(new Request("https://mcp.example/authorize"), env);
+    const response = await handle(new Request("https://mcp.example/mcp"), environment());
 
     expect(response.status).toBe(403);
-    expect((env.OAUTH_PROVIDER as unknown as { completeAuthorization: ReturnType<typeof vi.fn> }).completeAuthorization).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("forwards an authenticated request to the gateway origin over the protected Tunnel", async () => {
+    vi.mocked(verifyAccessAssertion).mockResolvedValue({ subject: "user-subject", email: "user@example.com" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
+
+    const response = await handle(
+      new Request("https://mcp.example/mcp", { headers: { "Cf-Access-Jwt-Assertion": "assertion-token" } }),
+      environment()
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [target, init] = fetchSpy.mock.calls[0];
+    expect(target.toString()).toBe("https://gateway.example/mcp");
+    const headers = init?.headers as Headers;
+    expect(headers.get("cf-access-client-id")).toBe("worker-client-id");
+    expect(headers.get("cf-access-client-secret")).toBe("worker-client-secret");
+    fetchSpy.mockRestore();
   });
 });

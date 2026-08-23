@@ -9,7 +9,7 @@ Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any s
 ```text
 adapters/open-code-review/   deterministic MCP tools wrapping the ocr CLI (stdio)
 gateway/                     generic stdio MCP -> Streamable HTTP transport, no adapter-specific logic
-deployments/cloudflare/      Named Tunnel + Worker (/mcp proxy, OAuth) + their setup docs
+deployments/cloudflare/      Named Tunnel + Worker (/mcp proxy, Access Managed OAuth) + their setup docs
 plugin/skills/                ChatGPT-facing Delegation Mode skill
 docs/                         architecture and ChatGPT connection docs
 ```
@@ -18,7 +18,7 @@ docs/                         architecture and ChatGPT connection docs
 
 ```text
 ChatGPT
-  -> Cloudflare Worker (/mcp, OAuth-protected, origin hidden)
+  -> Cloudflare Worker (/mcp, Access Managed OAuth-protected, origin hidden)
   -> Cloudflare Named Tunnel (outbound-only from the local machine)
   -> gateway/ (generic stdio MCP -> Streamable HTTP)
   -> adapters/open-code-review/ (deterministic MCP tools)
@@ -33,7 +33,7 @@ This project does not implement code review. OCR remains authoritative for deter
 - Node.js 20+
 - Git 2.41+
 - Alibaba OpenCodeReview (`ocr`)
-- a Cloudflare account, for the Tunnel/Worker/OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
+- a Cloudflare account, for the Tunnel/Worker/Access Managed OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
 
 Install OCR:
 
@@ -76,7 +76,7 @@ The gateway binds to `127.0.0.1` only and never inspects the tools it proxies --
 
 ## Connect to ChatGPT
 
-See [`docs/CHATGPT_SETUP.md`](docs/CHATGPT_SETUP.md) for the full path: exposing the gateway through a Cloudflare Named Tunnel ([`deployments/cloudflare/docs/TUNNEL.md`](deployments/cloudflare/docs/TUNNEL.md)), deploying the Worker in front of it ([`deployments/cloudflare/docs/WORKER.md`](deployments/cloudflare/docs/WORKER.md)), and confirming OAuth ([`deployments/cloudflare/docs/OAUTH.md`](deployments/cloudflare/docs/OAUTH.md)) before registering the connector in ChatGPT.
+See [`docs/CHATGPT_SETUP.md`](docs/CHATGPT_SETUP.md) for the full path: exposing the gateway through a Cloudflare Named Tunnel ([`deployments/cloudflare/docs/TUNNEL.md`](deployments/cloudflare/docs/TUNNEL.md)), deploying the Worker in front of it ([`deployments/cloudflare/docs/WORKER.md`](deployments/cloudflare/docs/WORKER.md)), and confirming Access Managed OAuth ([`deployments/cloudflare/docs/OAUTH.md`](deployments/cloudflare/docs/OAUTH.md)) before registering the connector in ChatGPT.
 
 ## MCP tools (`adapters/open-code-review`)
 
@@ -111,7 +111,7 @@ The same contract is included in the MCP server instructions and in [`plugin/ski
 - unsafe Git refs and newline/NUL injection rejected
 - one configured repository per adapter process
 - gateway binds to `127.0.0.1` only; only the Tunnel is outbound
-- Worker enforces OAuth on `/mcp` and never exposes the Tunnel hostname to a client
+- Worker sits behind Cloudflare Access Managed OAuth on `/mcp` and never exposes the Tunnel hostname to a client
 - no secret committed to this repository
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

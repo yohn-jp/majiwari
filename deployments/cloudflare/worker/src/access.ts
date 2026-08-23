@@ -1,12 +1,11 @@
-export interface OperatorIdentity {
+export interface AccessIdentity {
   subject: string;
   email: string;
 }
 
 export interface AccessEnvironment {
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_AUDIENCE?: string;
-  OPERATOR_EMAIL?: string;
+  MCP_ACCESS_TEAM_DOMAIN?: string;
+  MCP_ACCESS_AUDIENCE?: string;
   ACCESS_CERTS_URL?: string;
 }
 
@@ -112,22 +111,24 @@ async function verifyAccessJwt(token: string, issuer: string, audience: string, 
 }
 
 /**
- * Validates the Cloudflare Access assertion and applies the single-operator policy.
- * Missing or invalid configuration, assertions, and identities all fail closed.
+ * Validates the Cloudflare Access assertion presented to the Managed OAuth
+ * boundary in front of /mcp. Trusts the Access Policy for who is allowed
+ * through; only verifies the assertion is genuine, current, and scoped to
+ * this application. Missing or invalid configuration, assertions, and
+ * identities all fail closed.
  */
-export async function authenticateOperator(request: Request, env: AccessEnvironment): Promise<OperatorIdentity | null> {
-  const teamDomain = env.ACCESS_TEAM_DOMAIN ? normalizeHttpsUrl(env.ACCESS_TEAM_DOMAIN) : null;
-  const audience = env.ACCESS_AUDIENCE?.trim();
-  const configuredEmail = env.OPERATOR_EMAIL?.trim().toLowerCase();
+export async function verifyAccessAssertion(request: Request, env: AccessEnvironment): Promise<AccessIdentity | null> {
+  const teamDomain = env.MCP_ACCESS_TEAM_DOMAIN ? normalizeHttpsUrl(env.MCP_ACCESS_TEAM_DOMAIN) : null;
+  const audience = env.MCP_ACCESS_AUDIENCE?.trim();
   const token = request.headers.get("Cf-Access-Jwt-Assertion");
-  if (!teamDomain || !audience || !configuredEmail || !token) return null;
+  if (!teamDomain || !audience || !token) return null;
 
   const certsUrl = env.ACCESS_CERTS_URL ? normalizeHttpsUrl(env.ACCESS_CERTS_URL) : `${teamDomain}/cdn-cgi/access/certs`;
   if (!certsUrl) return null;
 
   const claims = await verifyAccessJwt(token, teamDomain, audience, certsUrl);
   const email = claims?.email;
-  if (!claims || typeof email !== "string" || email.trim().toLowerCase() !== configuredEmail) return null;
+  if (!claims || typeof email !== "string" || email.trim().length === 0) return null;
 
   return { subject: claims.sub as string, email: email.trim().toLowerCase() };
 }

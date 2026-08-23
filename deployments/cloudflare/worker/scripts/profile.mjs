@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 
 export const WORKER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DEFAULT_PROFILE_PATH = path.resolve(WORKER_DIR, "..", "deployment-profile.local.json");
-export const PUBLIC_MCP_DEFINE = "__MAJIWARI_PUBLIC_MCP_URL__";
 export const ORIGIN_ACCESS_ID_BINDING = "GATEWAY_ACCESS_CLIENT_ID";
 export const ORIGIN_ACCESS_SECRET_BINDING = "GATEWAY_ACCESS_CLIENT_SECRET";
 
@@ -16,15 +15,8 @@ export function resolveProfilePath(value) {
   return path.resolve(WORKER_DIR, "../../..", value);
 }
 
-const PROFILE_FIELDS = new Set([
-  "accountId",
-  "publicMcpUrl",
-  "gatewayOrigin",
-  "oauthKvNamespaceId",
-  "operatorAccess",
-  "secretBindings"
-]);
-const OPERATOR_ACCESS_FIELDS = new Set(["teamDomain", "audience", "operatorEmail"]);
+const PROFILE_FIELDS = new Set(["accountId", "publicMcpUrl", "gatewayOrigin", "mcpAccess", "secretBindings"]);
+const MCP_ACCESS_FIELDS = new Set(["teamDomain", "audience"]);
 const PLACEHOLDER_PATTERN = /REPLACE_WITH|CHANGE_ME|YOUR(?:[-_ ]|$)|<[^>]+>|example\.(?:com|net|org|invalid)/i;
 const SECRET_KEY_PATTERN = /(?:secret|password|token|private.?key|credential|api.?key)/i;
 const BINDING_PATTERN = /^[A-Z][A-Z0-9_]*$/;
@@ -114,25 +106,15 @@ function validateTeamDomain(value, field, errors) {
   }
 }
 
-function validateOperatorEmail(value, field, errors) {
-  if (typeof value !== "string" || value.trim() === "") {
-    errors.push(`${field} is required`);
+function validateMcpAccess(mcpAccess, errors) {
+  if (!isRecord(mcpAccess)) {
+    errors.push("mcpAccess is required");
     return;
   }
-  if (isPlaceholder(value)) errors.push(`${field} contains a placeholder`);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) errors.push(`${field} must be a valid email address`);
-}
-
-function validateOperatorAccess(operatorAccess, errors) {
-  if (!isRecord(operatorAccess)) {
-    errors.push("operatorAccess is required");
-    return;
-  }
-  addUnknownFieldErrors(operatorAccess, OPERATOR_ACCESS_FIELDS, "operatorAccess", errors);
-  validateTeamDomain(operatorAccess.teamDomain, "operatorAccess.teamDomain", errors);
-  const audience = requiredString({ "operatorAccess.audience": operatorAccess.audience }, "operatorAccess.audience", errors);
-  if (audience && isPlaceholder(audience)) errors.push("operatorAccess.audience contains a placeholder");
-  validateOperatorEmail(operatorAccess.operatorEmail, "operatorAccess.operatorEmail", errors);
+  addUnknownFieldErrors(mcpAccess, MCP_ACCESS_FIELDS, "mcpAccess", errors);
+  validateTeamDomain(mcpAccess.teamDomain, "mcpAccess.teamDomain", errors);
+  const audience = requiredString({ "mcpAccess.audience": mcpAccess.audience }, "mcpAccess.audience", errors);
+  if (audience && isPlaceholder(audience)) errors.push("mcpAccess.audience contains a placeholder");
 }
 
 function validateSecretBindings(value, errors) {
@@ -192,10 +174,7 @@ export function validateDeploymentProfile(profile) {
     errors.push("public-resource/origin mismatch: publicMcpUrl and gatewayOrigin must use different origins");
   }
 
-  const oauthKvNamespaceId = requiredString(profile, "oauthKvNamespaceId", errors);
-  if (oauthKvNamespaceId) validateCloudflareId(oauthKvNamespaceId, "oauthKvNamespaceId", errors);
-
-  validateOperatorAccess(profile.operatorAccess, errors);
+  validateMcpAccess(profile.mcpAccess, errors);
   validateSecretBindings(profile.secretBindings, errors);
 
   if (errors.length > 0) throw new ProfileValidationError(errors);
@@ -222,17 +201,11 @@ export async function readDeploymentProfile(profilePath = DEFAULT_PROFILE_PATH) 
 export function buildWranglerConfig(baseConfig, profile) {
   const config = structuredClone(baseConfig);
   config.account_id = profile.accountId;
-  config.kv_namespaces = [{ binding: "OAUTH_KV", id: profile.oauthKvNamespaceId }];
   config.vars = {
     ...(config.vars ?? {}),
     GATEWAY_ORIGIN: profile.gatewayOrigin,
-    ACCESS_TEAM_DOMAIN: profile.operatorAccess.teamDomain,
-    ACCESS_AUDIENCE: profile.operatorAccess.audience,
-    OPERATOR_EMAIL: profile.operatorAccess.operatorEmail
-  };
-  config.define = {
-    ...(config.define ?? {}),
-    [PUBLIC_MCP_DEFINE]: JSON.stringify(profile.publicMcpUrl)
+    MCP_ACCESS_TEAM_DOMAIN: profile.mcpAccess.teamDomain,
+    MCP_ACCESS_AUDIENCE: profile.mcpAccess.audience
   };
   config.secrets = { required: [...profile.secretBindings] };
   return config;
@@ -243,10 +216,8 @@ export function safeProfileSummary(profile) {
     `publicMcpUrl: ${profile.publicMcpUrl}`,
     `gatewayOrigin: ${profile.gatewayOrigin}`,
     "accountId: configured",
-    "oauthKvNamespaceId: configured",
-    "operatorAccess.teamDomain: configured",
-    "operatorAccess.audience: configured",
-    "operatorAccess.operatorEmail: configured",
+    "mcpAccess.teamDomain: configured",
+    "mcpAccess.audience: configured",
     `secretBindings: ${profile.secretBindings.join(", ")}`
   ].join("\n");
 }

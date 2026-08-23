@@ -26,16 +26,16 @@ OpenCodeReview (OCR) delegation is the first adapter, not the platform's purpose
 | Skill (`plugin/skills/`) | Tool call order, LLM judgment, coverage invariants | adapter tool surface, domain workflow | CLI implementation detail, transport |
 | Runtime | Run an adapter as a stdio MCP server | MCP server contract | domain reasoning |
 | Gateway (`gateway/`) | Turn stdio MCP into remote MCP | MCP protocol/transport | OCR or any other adapter's domain semantics |
-| Deployment (`deployments/cloudflare/`) | Tunnel / Worker / OAuth / secrets | network, auth, hosting | adapter tool semantics |
+| Deployment (`deployments/cloudflare/`) | Tunnel / Worker / Managed OAuth / secrets | network, auth, hosting | adapter tool semantics |
 
 ## Runtime
 
 ```text
 ChatGPT
   |
-  | MCP over Streamable HTTP + OAuth
+  | MCP over Streamable HTTP + Cloudflare Access Managed OAuth
   v
-Cloudflare Worker  (public /mcp entry point; OAuth-protected; origin hidden)
+Cloudflare Worker  (public /mcp entry point; Access-protected; origin hidden)
   |
   | Cloudflare Named Tunnel (outbound-only from the local machine)
   v
@@ -60,8 +60,8 @@ The gateway bridges two MCP `Transport` instances directly at the `send`/`onmess
 - Repository reads reject absolute/traversal paths and resolve symlinks before reading. Git refs reject option-like values and newline/NUL injection.
 - One adapter process is bound to one Git repository (`--repo` or `OCR_REPO`).
 - The gateway binds to localhost only; only the Tunnel is outbound from the development machine.
-- The Worker enforces OAuth on `/mcp` and never exposes the gateway's Tunnel hostname to a client (see `deployments/cloudflare/worker/src/index.ts`).
-- No secret (Tunnel credentials, OAuth state) is committed to this repository.
+- The Worker sits behind a Cloudflare Access Managed OAuth boundary on `/mcp` and never exposes the gateway's Tunnel hostname to a client (see `deployments/cloudflare/worker/src/index.ts`).
+- No secret (Tunnel credentials, Access service-token credentials) is committed to this repository. OAuth state itself is owned entirely by Cloudflare Access, not this repository.
 
 ## Supported delegation targets
 
