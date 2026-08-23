@@ -5,9 +5,9 @@
 # The standing token used to run this script (CLOUDFLARE_API_TOKEN in the
 # environment already) needs only "Account API Tokens" Edit -- nothing else.
 # Every other permission this repository's Terraform needs (Access: Apps
-# Write, Access: Policies Write, Access: Service Tokens Write, Connectivity
-# Directory Admin, ...) is granted only to the short-lived token this script
-# creates, for the duration of one command.
+# Write, Access: Policies Write, Connectivity Directory Admin, ...) is granted
+# only to the short-lived token this script creates, for the duration of one
+# command.
 #
 # Permission group names must match exactly what this account's
 # /accounts/{id}/tokens/permission_groups returns -- Cloudflare splits most
@@ -21,7 +21,7 @@
 #
 # Example:
 #   with-scoped-token.sh cbde0d943a9f28b00cd34bb12ebd142d \
-#     "Access: Apps Write,Access: Policies Write,Access: Service Tokens Write,Connectivity Directory Admin" \
+#     "Access: Apps Write,Access: Policies Write,Connectivity Directory Admin" \
 #     -- terraform -chdir=deployments/cloudflare/terraform apply -var=...
 #
 # Requires: curl, jq. Reads CLOUDFLARE_API_TOKEN from the environment for the

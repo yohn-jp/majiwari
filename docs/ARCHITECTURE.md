@@ -61,7 +61,7 @@ The gateway is [mcp-proxy](https://github.com/punkpeye/mcp-proxy) (see `gateway/
 - One adapter process is bound to one Git repository (`--repo` or `OCR_REPO`).
 - The gateway binds to localhost only; only the Tunnel is outbound from the development machine.
 - The Worker sits behind a Cloudflare Access Managed OAuth boundary on `/mcp` and never exposes the gateway's Tunnel hostname to a client (see `deployments/cloudflare/worker/src/index.ts`).
-- No secret (Tunnel credentials, Access service-token credentials) is committed to this repository. OAuth state itself is owned entirely by Cloudflare Access, not this repository.
+- No secret (including Tunnel credentials) is committed to this repository. The current Workers VPC path has no origin service-token credential. OAuth state itself is owned entirely by Cloudflare Access, not this repository.
 
 ## Supported delegation targets
 

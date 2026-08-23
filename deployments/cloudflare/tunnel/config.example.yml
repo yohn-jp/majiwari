@@ -1,3 +1,5 @@
+# Rollback-only configuration. The current Terraform path uses a Workers VPC
+# Service and does not provision this public hostname or Access application.
 tunnel: <TUNNEL_UUID>
 credentials-file: /home/you/.cloudflared/<TUNNEL_UUID>.json
 

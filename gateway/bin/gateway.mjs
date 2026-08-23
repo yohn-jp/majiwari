@@ -6,10 +6,11 @@
 // for the target stdio command.
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 
-function parseArgs(argv, env) {
+export function parseArgs(argv, env) {
   const result = { command: undefined, args: [], port: undefined, host: "127.0.0.1" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -40,26 +41,32 @@ function parseArgs(argv, env) {
   return result;
 }
 
-const cli = parseArgs(process.argv.slice(2), process.env);
-if (!cli.command) {
-  process.stderr.write("gateway requires a target stdio MCP command (positional arg, or MAJIWARI_TARGET_COMMAND)\n");
-  process.exit(1);
+function startGateway(argv, env) {
+  const cli = parseArgs(argv, env);
+  if (!cli.command) {
+    process.stderr.write("gateway requires a target stdio MCP command (positional arg, or MAJIWARI_TARGET_COMMAND)\n");
+    process.exit(1);
+  }
+
+  const mcpProxyPackageJson = require.resolve("mcp-proxy/package.json");
+  const mcpProxyBin = mcpProxyPackageJson.replace(/package\.json$/, "dist/bin/mcp-proxy.mjs");
+
+  const child = spawn(
+    process.execPath,
+    [mcpProxyBin, "--port", cli.port, "--host", cli.host, "--server", "stream", "--", cli.command, ...cli.args],
+    { stdio: "inherit" }
+  );
+
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 1);
+  });
+
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => child.kill(sig));
+  }
 }
 
-const mcpProxyPackageJson = require.resolve("mcp-proxy/package.json");
-const mcpProxyBin = mcpProxyPackageJson.replace(/package\.json$/, "dist/bin/mcp-proxy.mjs");
-
-const child = spawn(
-  process.execPath,
-  [mcpProxyBin, "--port", cli.port, "--host", cli.host, "--server", "stream", "--", cli.command, ...cli.args],
-  { stdio: "inherit" }
-);
-
-child.on("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code ?? 1);
-});
-
-for (const sig of ["SIGINT", "SIGTERM"]) {
-  process.on(sig, () => child.kill(sig));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startGateway(process.argv.slice(2), process.env);
 }

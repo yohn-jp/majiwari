@@ -49,5 +49,14 @@ Four distinct things, not to be confused with each other:
 
 - **Product endpoint**: this Worker's `/mcp`, independently usable by any MCP client today, with no dependency on the item below.
 - **Managed OAuth Access layer**: the `mcp`-type Access Application in [`../terraform/access.tf`](../terraform/access.tf), described on this page. This is what a client actually authenticates against.
-- **Worker-to-gateway path**: the `cloudflare_connectivity_directory_service` Workers VPC Service in the same file, described in [`TUNNEL.md`](TUNNEL.md). This is how the Worker reaches the gateway and has nothing to do with client-facing OAuth. (A legacy `self_hosted` Access Application and Service Token for the same hop are also provisioned but unused, kept only as a rollback path.)
+- **Worker-to-gateway path**: the `cloudflare_connectivity_directory_service` Workers VPC Service in the same file, described in [`TUNNEL.md`](TUNNEL.md). This is how the Worker reaches the gateway and has nothing to do with client-facing OAuth. It is the only gateway path managed by the current Terraform configuration.
 - **Cloudflare MCP Portal** (optional, not deployed by this repository): an account-level aggregation point that can front multiple MCP server applications, including this one, behind a single Portal URL. Registering this Worker's `/mcp` Access Application behind a future Portal is additive -- it does not require changing the Managed OAuth Access Application, the Worker, or the gateway described here.
+
+## Rollback
+
+The former public-hostname self-hosted Access Application and Service Token
+are not kept live as a parallel rollback stack. If the Workers VPC path must
+be restored, revert the Terraform commit that removed those resources, review
+the resulting `terraform plan`, and run `terraform apply`. After the VPC path
+is healthy, remove the temporary rollback resources by applying the current
+configuration again.

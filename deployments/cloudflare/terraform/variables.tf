@@ -1,22 +1,11 @@
 variable "cloudflare_account_id" {
   type        = string
-  description = "Cloudflare account that owns the Access application and service token."
-}
-
-variable "gateway_hostname" {
-  type        = string
-  description = "Named Tunnel hostname formerly protecting the gateway origin over the public zone. Kept only for the legacy self_hosted Access Application below, retained as a rollback path now that the gateway is reached over a Workers VPC Service instead."
+  description = "Cloudflare account that owns the Access application and Workers VPC Service."
 }
 
 variable "gateway_tunnel_id" {
   type        = string
   description = "ID of the Named Tunnel (cloudflared) that reaches the gateway process. Used by the Workers VPC Service to route Worker traffic to the gateway without traversing the public zone's WAF."
-}
-
-variable "service_token_duration" {
-  type        = string
-  description = "Lifetime of the Worker-only Access service token."
-  default     = "8760h"
 }
 
 variable "public_mcp_hostname" {
@@ -26,13 +15,13 @@ variable "public_mcp_hostname" {
 
 variable "mcp_access_allowed_email_domains" {
   type        = list(string)
-  description = "Email domains allowed through the /mcp Managed OAuth Access policy. Combined with mcp_access_allowed_emails; if both are empty, everyone in the identity provider(s) configured on the account is allowed."
+  description = "Email domains allowed through the /mcp Managed OAuth Access policy. Combined with mcp_access_allowed_emails; at least one of these two allowlists must be non-empty or Terraform plan/apply fails."
   default     = []
 }
 
 variable "mcp_access_allowed_emails" {
   type        = list(string)
-  description = "Individual email addresses allowed through the /mcp Managed OAuth Access policy, in addition to mcp_access_allowed_email_domains. Combined with mcp_access_allowed_email_domains; if both are empty, everyone in the identity provider(s) configured on the account is allowed."
+  description = "Individual email addresses allowed through the /mcp Managed OAuth Access policy, in addition to mcp_access_allowed_email_domains. Combined with mcp_access_allowed_email_domains; at least one of these two allowlists must be non-empty or Terraform plan/apply fails."
   default     = []
 }
 
