@@ -4,7 +4,7 @@ The Worker is the only public entry point. It terminates OAuth and proxies `/mcp
 
 ## Prerequisites
 
-- [`TUNNEL.md`](TUNNEL.md) completed: a Named Tunnel hostname reachable from Cloudflare
+- [`TUNNEL.md`](TUNNEL.md) completed: a Named Tunnel hostname protected by Cloudflare Access
 - a Cloudflare account, `wrangler` authenticated (`npx wrangler login`)
 
 ## 1. Create the OAuth KV namespace
@@ -30,11 +30,22 @@ Edit `wrangler.jsonc`'s `vars.GATEWAY_ORIGIN` to the Tunnel hostname from `TUNNE
 
 This value is never sent to the client -- the Worker only ever proxies to it server-side.
 
-## 3. Set the public hostname in the OAuth resource metadata
+## 3. Set Worker Access secrets
+
+The Worker authenticates to the protected Tunnel with a dedicated Access Service Token. Set both values as Wrangler secrets; do not add them to `wrangler.jsonc`, source files, shell history, or logs:
+
+```bash
+npx wrangler secret put GATEWAY_ACCESS_CLIENT_ID
+npx wrangler secret put GATEWAY_ACCESS_CLIENT_SECRET
+```
+
+The values come from the Terraform outputs described in [`TUNNEL.md`](TUNNEL.md). `GATEWAY_ACCESS_CLIENT_SECRET` is accepted only by the upstream request and is never exposed to the MCP client.
+
+## 4. Set the public hostname in the OAuth resource metadata
 
 Edit `src/index.ts`'s `resourceMetadata.resource` and `resourceMetadata.authorization_servers[0]` to this Worker's actual public hostname (the one you'll register in ChatGPT), e.g. `https://mcp.example.com`. This is compiled into the Worker at deploy time, not read from an environment variable -- `OAuthProvider`'s configuration is constructed at module load, before any request's `env` exists.
 
-## 4. Deploy
+## 5. Deploy
 
 ```bash
 npm install
@@ -43,7 +54,7 @@ npm run deploy
 
 `wrangler deploy` prints the deployed Worker's `*.workers.dev` URL, or your configured custom domain if `wrangler.jsonc` has a `routes` entry.
 
-## 5. Verify
+## 6. Verify
 
 ```bash
 curl -s https://<worker-hostname>/health
@@ -61,12 +72,8 @@ This Worker's `/authorize` handler grants access to a single fixed operator iden
 
 Before granting access to more than one person, replace that handler with a real authentication and consent step (see the `AuthProps`/`completeAuthorization` call in `src/index.ts` and the [`@cloudflare/workers-oauth-provider` README](https://github.com/cloudflare/workers-oauth-provider) for the extension points). That is out of scope for v0.
 
-## Secrets
+## Secrets and configuration
 
-Nothing in this Worker configuration is a secret in the `wrangler secret put` sense for v0 (no third-party IdP client ID/secret is used). `OAUTH_KV` holds provider-managed state (registered clients, grants, tokens) and is provisioned as a binding, not a secret value. If a future auth provider is added, store its client secret with:
-
-```bash
-npx wrangler secret put <NAME>
-```
-
-Never commit `wrangler.jsonc` with a filled-in KV namespace `id` from a shared/production account into a public fork without checking your organization's disclosure policy for resource IDs; the ID alone does not grant access without account credentials, but treat it as configuration to review before publishing.
+- `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` are Wrangler secrets created in step 3. They are not present in repository files or Worker responses.
+- `OAUTH_KV` holds provider-managed state (registered clients, grants, and tokens) as a binding, not a secret value.
+- `GATEWAY_ORIGIN` and the KV namespace ID are deployment configuration. Review them before publishing a fork; neither replaces the Worker Access secrets.

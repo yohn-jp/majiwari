@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProxyTarget, filterHeaders } from "../src/proxy";
+import { buildProxyTarget, filterHeaders, withServiceToken } from "../src/proxy";
 
 describe("buildProxyTarget", () => {
   it("rewrites the path and query onto the gateway origin, never the origin's own path", () => {
@@ -33,15 +33,51 @@ describe("filterHeaders", () => {
     expect(filtered.has("transfer-encoding")).toBe(false);
   });
 
-  it("preserves MCP session and protocol headers unmodified", () => {
+  it("strips client and origin authentication headers", () => {
     const source = new Headers({
       "mcp-session-id": "abc-123",
       "mcp-protocol-version": "2026-06-18",
-      authorization: "Bearer token"
+      authorization: "Bearer client-token",
+      "cf-access-client-id": "client-id",
+      "cf-access-client-secret": "client-secret",
+      "cf-access-jwt-assertion": "client-jwt",
+      "x-forwarded-authorization": "Bearer forwarded-token"
     });
     const filtered = filterHeaders(source);
     expect(filtered.get("mcp-session-id")).toBe("abc-123");
     expect(filtered.get("mcp-protocol-version")).toBe("2026-06-18");
-    expect(filtered.get("authorization")).toBe("Bearer token");
+    expect(filtered.has("authorization")).toBe(false);
+    expect(filtered.has("cf-access-client-id")).toBe(false);
+    expect(filtered.has("cf-access-client-secret")).toBe(false);
+    expect(filtered.has("cf-access-jwt-assertion")).toBe(false);
+    expect(filtered.has("x-forwarded-authorization")).toBe(false);
+  });
+});
+
+describe("withServiceToken", () => {
+  it("injects only configured credentials and preserves required MCP headers", () => {
+    const source = new Headers({
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      "mcp-session-id": "abc-123",
+      authorization: "Bearer client-token",
+      "cf-access-client-id": "client-id",
+      "cf-access-client-secret": "client-secret"
+    });
+
+    const upstream = withServiceToken(source, "worker-client-id", "worker-client-secret");
+
+    expect(upstream.get("accept")).toBe("application/json, text/event-stream");
+    expect(upstream.get("content-type")).toBe("application/json");
+    expect(upstream.get("mcp-session-id")).toBe("abc-123");
+    expect(upstream.get("cf-access-client-id")).toBe("worker-client-id");
+    expect(upstream.get("cf-access-client-secret")).toBe("worker-client-secret");
+    expect(upstream.get("authorization")).toBe(null);
+  });
+
+  it("fails closed when either service-token secret is missing", () => {
+    expect(() => withServiceToken(new Headers(), "", "secret")).toThrow(
+      "Gateway Access service-token secrets are not configured"
+    );
   });
 });

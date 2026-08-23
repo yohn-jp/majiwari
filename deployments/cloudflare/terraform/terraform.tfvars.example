@@ -1,0 +1,2 @@
+cloudflare_account_id = "replace-with-cloudflare-account-id"
+gateway_hostname      = "majiwari-gateway.internal.example.com"

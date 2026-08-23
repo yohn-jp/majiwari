@@ -1,6 +1,6 @@
 import { OAuthProvider, type AuthRequest } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { buildProxyTarget, filterHeaders } from "./proxy";
+import { buildProxyTarget, filterHeaders, withServiceToken } from "./proxy";
 import { isPublicRoute } from "./routes";
 
 export interface Env {
@@ -8,6 +8,10 @@ export interface Env {
   OAUTH_PROVIDER: import("@cloudflare/workers-oauth-provider").OAuthHelpers;
   /** Tunnel-internal origin for the Majiwari gateway. Never exposed to clients. */
   GATEWAY_ORIGIN: string;
+  /** Cloudflare Access service-token client ID. Provision with `wrangler secret put`. */
+  GATEWAY_ACCESS_CLIENT_ID: string;
+  /** Cloudflare Access service-token client secret. Provision with `wrangler secret put`. */
+  GATEWAY_ACCESS_CLIENT_SECRET: string;
 }
 
 interface AuthProps {
@@ -18,7 +22,8 @@ interface AuthProps {
 /**
  * Proxies /mcp to the gateway's internal origin over the Tunnel. Never
  * rewrites MCP semantics (method, headers, streaming body, status) beyond
- * what's required to swap the origin -- OAuth is the only thing added here.
+ * what's required to swap the origin and authenticate the Tunnel -- OAuth and
+ * the Worker-owned Access service token are the only things added here.
  */
 export class McpProxyHandler extends WorkerEntrypoint<Env, AuthProps> {
   async fetch(request: Request): Promise<Response> {
@@ -26,7 +31,11 @@ export class McpProxyHandler extends WorkerEntrypoint<Env, AuthProps> {
 
     const upstream = await fetch(target, {
       method: request.method,
-      headers: filterHeaders(request.headers),
+      headers: withServiceToken(
+        request.headers,
+        this.env.GATEWAY_ACCESS_CLIENT_ID,
+        this.env.GATEWAY_ACCESS_CLIENT_SECRET
+      ),
       body: request.body,
       // @ts-expect-error -- Workers runtime requires this for streamed request bodies.
       duplex: request.body ? "half" : undefined
