@@ -69,14 +69,18 @@ The deploy wrapper validates the profile, generates an ignored temporary Wrangle
 
 ## 5. Verify
 
+The `mcp`-type Access Application's `domain` covers the whole public hostname, not just `/mcp` -- so `/health` is also behind the Managed OAuth boundary once deployed with a custom domain, even though the Worker's own code (`src/index.ts`) would answer `/health` without checking the Access assertion:
+
 ```bash
-curl -s https://<worker-hostname>/health
-# {"ok":true}
+curl -s -o /dev/null -w '%{http_code}\n' https://<worker-hostname>/health
+# 401 from Cloudflare Access, before the request reaches the Worker
 
 curl -s -o /dev/null -w '%{http_code}\n' https://<worker-hostname>/mcp
-# 403 from the Worker if an Access assertion reaches it unauthenticated, or a
-# Cloudflare Access redirect/challenge before the request reaches the Worker
+# 401/403 from Cloudflare Access, or a redirect/challenge, before the request
+# reaches the Worker
 ```
+
+To confirm the Worker's own routing and its unauthenticated `/health` branch directly (bypassing the Access boundary), hit the `workers.dev` route instead if one is enabled, or invoke `fetch` against the Worker in a local `wrangler dev` session.
 
 See [`OAUTH.md`](OAUTH.md) for the full Managed OAuth flow and how the Worker validates the resulting `Cf-Access-Jwt-Assertion`.
 

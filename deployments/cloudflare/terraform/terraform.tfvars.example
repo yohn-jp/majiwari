@@ -1,2 +1,5 @@
 cloudflare_account_id = "replace-with-cloudflare-account-id"
 gateway_hostname      = "majiwari-gateway.internal.example.com"
+public_mcp_hostname   = "mcp.example.com"
+# Each MCP client's dynamic-client-registration callback pattern, for example ["https://chatgpt.com/*"]
+mcp_access_allowed_redirect_uris = []

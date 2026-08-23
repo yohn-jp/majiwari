@@ -73,16 +73,18 @@ ingress:
 
 The `access` block must remain under this hostname's ingress rule. `cloudflared` uses it to validate the `Cf-Access-Jwt-Assertion` header for the protected route before proxying to the gateway. The port must match the gateway's `--port` (see `gateway/src/server.js`).
 
-Validate the ingress configuration before starting the tunnel:
+Validate the ingress configuration before starting the tunnel. `--config` is a global flag and must come before the `tunnel` subcommand, not after it:
 
 ```bash
-cloudflared tunnel ingress validate --config ~/.cloudflared/config.yml
+cloudflared --config ~/.cloudflared/config.yml tunnel ingress validate
 ```
 
 ## 6. Run the tunnel
 
+`--config` is a global flag; keep it before the `tunnel` subcommand:
+
 ```bash
-cloudflared tunnel --config ~/.cloudflared/config.yml run majiwari-gateway
+cloudflared --config ~/.cloudflared/config.yml tunnel run majiwari-gateway
 ```
 
 Keep this running alongside the gateway process. Both are local-machine, outbound-only processes; neither opens an inbound firewall port.

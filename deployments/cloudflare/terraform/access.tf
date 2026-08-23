@@ -64,5 +64,9 @@ resource "cloudflare_zero_trust_access_application" "mcp" {
       access_token_lifetime = var.mcp_access_token_lifetime
       session_duration      = var.mcp_access_session_duration
     }
+    dynamic_client_registration = {
+      enabled      = true
+      allowed_uris = var.mcp_access_allowed_redirect_uris
+    }
   }
 }

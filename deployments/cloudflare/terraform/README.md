@@ -67,7 +67,8 @@ terraform apply \
   -var='cloudflare_account_id=<ACCOUNT_ID>' \
   -var='gateway_hostname=majiwari-gateway.internal.example.com' \
   -var='public_mcp_hostname=mcp.example.com' \
-  -var='mcp_access_allowed_email_domains=["example.com"]'
+  -var='mcp_access_allowed_email_domains=["example.com"]' \
+  -var='mcp_access_allowed_redirect_uris=["https://chatgpt.com/*"]'
 ```
 
 `mcp_access_allowed_email_domains` defaults to an empty list, which allows
@@ -76,6 +77,16 @@ narrow it for anything beyond local testing. Creating an `mcp`-type Access
 application requires the same account-scoped `Zero Trust` and `Access: Apps`
 / `Access: Policies` Edit permissions as above; Cloudflare has not published a
 narrower permission specific to MCP applications as of this writing.
+
+`mcp_access_allowed_redirect_uris` defaults to an empty list. Without it, the
+`/mcp` Managed OAuth boundary's dynamic client registration rejects every
+client's authorization redirect with `invalid_client_metadata: redirect_uri
+is not allowed by the account configuration`, because
+`oauth_configuration.dynamic_client_registration.allowed_uris` has nothing to
+match against. Set it to each MCP client's callback pattern before
+connecting that client — for ChatGPT, `https://chatgpt.com/*` (`/*` matches
+both ChatGPT's stable `connector_platform_oauth_redirect` path and its
+per-connector `connector/oauth/<id>` fallback in one entry).
 
 Terraform state contains the generated service-token secret. Use encrypted or
 remote state and never commit state files. The local `.gitignore` is a guard,

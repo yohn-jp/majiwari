@@ -36,3 +36,9 @@ variable "mcp_access_session_duration" {
   description = "Lifetime of the underlying Access session backing Managed OAuth grants for /mcp."
   default     = "24h"
 }
+
+variable "mcp_access_allowed_redirect_uris" {
+  type        = list(string)
+  description = "Redirect URIs allowed for OAuth clients dynamically registered against the /mcp Managed OAuth boundary (for example, an MCP client's callback URL). Each entry must use https and may end in /* to match all sub-paths."
+  default     = []
+}

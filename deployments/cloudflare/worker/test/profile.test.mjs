@@ -70,6 +70,7 @@ describe("generated Wrangler configuration", () => {
     strictEqual(config.vars.MCP_ACCESS_AUDIENCE, validProfile.mcpAccess.audience);
     strictEqual(config.vars.EXISTING, "kept");
     deepStrictEqual(config.secrets, { required: [ORIGIN_ACCESS_ID_BINDING, ORIGIN_ACCESS_SECRET_BINDING] });
+    deepStrictEqual(config.routes, [{ pattern: "mcp.test", custom_domain: true }]);
     doesNotMatch(JSON.stringify(config), /do-not-print|secret-value/i);
   });
 });

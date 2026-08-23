@@ -208,6 +208,7 @@ export function buildWranglerConfig(baseConfig, profile) {
     MCP_ACCESS_AUDIENCE: profile.mcpAccess.audience
   };
   config.secrets = { required: [...profile.secretBindings] };
+  config.routes = [{ pattern: new URL(profile.publicMcpUrl).hostname, custom_domain: true }];
   return config;
 }
 

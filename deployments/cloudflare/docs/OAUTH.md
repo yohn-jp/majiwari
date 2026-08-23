@@ -23,15 +23,18 @@ It does not check the caller's identity against an allowlist in code -- that aut
 
 ## Verifying end to end
 
+The `mcp`-type Access Application's `domain` covers the whole public hostname (see [`../terraform/access.tf`](../terraform/access.tf)), so every path -- including retired endpoints the Worker itself would answer `404` for -- is rejected by Cloudflare Access before the request reaches the Worker at all:
+
 ```bash
 # 1. Unauthenticated /mcp is rejected
 curl -s -o /dev/null -w '%{http_code}\n' https://<worker-host>/mcp
-# expect: 403 from the Worker, or a Cloudflare Access redirect/challenge in front of it
+# expect: 401/403 from Cloudflare Access, or a redirect/challenge, in front of the Worker
 
-# 2. Retired endpoints are gone
+# 2. Retired endpoints are also rejected by Access, not reached by the Worker
 curl -s -o /dev/null -w '%{http_code}\n' https://<worker-host>/authorize
 curl -s -o /dev/null -w '%{http_code}\n' https://<worker-host>/oauth/token
-# expect: 404 for both
+# expect: 401 from Cloudflare Access for both (not the Worker's own 404 --
+# that only shows if these paths are reached directly, bypassing Access)
 ```
 
 Full authorization-code + token exchange is easiest to verify through an actual MCP client (ChatGPT, or `npx @modelcontextprotocol/inspector`) rather than by hand with `curl`, since Cloudflare Access drives a browser redirect and the OAuth exchange itself. See [`CHATGPT_SETUP.md`](../../../docs/CHATGPT_SETUP.md) for the ChatGPT-side registration steps against the Access-fronted endpoint.
