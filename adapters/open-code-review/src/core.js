@@ -69,6 +69,25 @@ export function buildPreviewArgs({ from, to, commit, exclude, background } = {})
   return args;
 }
 
+export function buildScanPreviewArgs({ path: scanPath, exclude, background } = {}) {
+  const args = ["scan", "--preview", "--format", "json"];
+  if (scanPath) {
+    const parts = String(scanPath).split(",").map((p) => validateRelativePath(p.trim(), "path"));
+    args.push("--path", parts.join(","));
+  }
+  if (exclude) args.push("--exclude", exclude);
+  if (background) args.push("--background", background);
+  return args;
+}
+
+export function buildRulesCheckArgs(filePath, rule) {
+  const safePath = validateRelativePath(filePath);
+  const args = ["rules", "check"];
+  if (rule) args.push("--rule", validateRelativePath(rule, "rule"));
+  args.push(safePath);
+  return args;
+}
+
 export function buildRuleArgs(paths, rule) {
   if (!Array.isArray(paths) || paths.length === 0) {
     throw new Error("paths must contain at least one reviewable file");

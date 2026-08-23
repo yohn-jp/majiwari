@@ -4,6 +4,8 @@ import {
   buildDiffArgs,
   buildPreviewArgs,
   buildRuleArgs,
+  buildRulesCheckArgs,
+  buildScanPreviewArgs,
   parseServerArgs,
   validateRef,
   validateRelativePath
@@ -52,6 +54,27 @@ test("range diff uses merge base supplied by OCR", () => {
     buildDiffArgs({ mode: "range", filePath: "src/a.ts", mergeBase: "abc123", to: "feature/x" }),
     { command: "git", args: ["diff", "abc123..feature/x", "--", "src/a.ts"], kind: "diff" }
   );
+});
+
+test("scan preview defaults to whole repository", () => {
+  assert.deepEqual(buildScanPreviewArgs(), ["scan", "--preview", "--format", "json"]);
+});
+
+test("scan preview accepts comma-separated paths", () => {
+  assert.deepEqual(buildScanPreviewArgs({ path: "src/a.ts, src/b.ts" }), [
+    "scan", "--preview", "--format", "json", "--path", "src/a.ts,src/b.ts"
+  ]);
+});
+
+test("scan preview rejects unsafe paths", () => {
+  assert.throws(() => buildScanPreviewArgs({ path: "../secret" }), /escapes/);
+});
+
+test("rules check args preserve OCR as rule authority", () => {
+  assert.deepEqual(buildRulesCheckArgs("src/a.ts"), ["rules", "check", "src/a.ts"]);
+  assert.deepEqual(buildRulesCheckArgs("src/a.ts", "custom.json"), [
+    "rules", "check", "--rule", "custom.json", "src/a.ts"
+  ]);
 });
 
 test("workspace untracked reads whole file", () => {

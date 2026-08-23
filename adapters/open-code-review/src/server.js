@@ -5,6 +5,8 @@ import {
   buildDiffArgs,
   buildPreviewArgs,
   buildRuleArgs,
+  buildRulesCheckArgs,
+  buildScanPreviewArgs,
   parseJson,
   parseServerArgs,
   readRepoFile,
@@ -27,8 +29,11 @@ const server = new McpServer(
     instructions: [
       "This server is a read-only host adapter for Alibaba OpenCodeReview (OCR) Delegation Mode.",
       "OCR is authoritative for deterministic review scope and rule resolution. The host model performs only the review reasoning delegated by OCR.",
-      "For every review: call adapter_health first; call ocr_delegate_preview exactly once for the requested workspace/range/commit target; resolve OCR rules for every previewed reviewable file; read every selected diff; use repo_read_file/repo_search only for needed context; account for every (path,status) entry as reviewed or skipped with a concrete reason.",
-      "Do not substitute a generic repository review, do not call OCR-managed LLM review, and do not mutate the repository through this adapter.",
+      "For a diff/range/commit review: call adapter_health first; call ocr_delegate_preview exactly once for the requested workspace/range/commit target; resolve OCR rules for every previewed reviewable file; read every selected diff via repo_diff.",
+      "For a general/full-file review of a repository or directory (no diff target): call adapter_health first; call scan_delegate_preview exactly once for the requested path (omit path for the whole repository); resolve OCR rules for every previewed reviewable file; read the full content of every selected file via repo_read_file.",
+      "Use ocr_rules_check to debug why a single file was included/excluded or which rule layer applies to it. Use repo_read_file/repo_search only for needed context.",
+      "Account for every previewed entry as reviewed or skipped with a concrete reason.",
+      "Do not call OCR-managed LLM review (ocr review / ocr scan without --preview), and do not mutate the repository through this adapter.",
       "Report findings with path/content and optional start_line/end_line/category/severity, plus total/reviewed/skipped counts and coverage_rate."
     ].join(" ")
   }
@@ -55,7 +60,9 @@ server.registerTool(
       git_version: z.string(),
       ocr_version: z.string(),
       delegate_preview_json_supported: z.boolean(),
-      delegate_rule_json_supported: z.boolean()
+      delegate_rule_json_supported: z.boolean(),
+      scan_preview_json_supported: z.boolean(),
+      rules_check_supported: z.boolean()
     },
     annotations: READ_ONLY
   },
@@ -64,17 +71,23 @@ server.registerTool(
     const ocr = await runCommand("ocr", ["--version"], { cwd: repoRoot });
     const previewHelp = await runCommand("ocr", ["delegate", "preview", "--help"], { cwd: repoRoot });
     const ruleHelp = await runCommand("ocr", ["delegate", "rule", "--help"], { cwd: repoRoot });
+    const scanHelp = await runCommand("ocr", ["scan", "--help"], { cwd: repoRoot });
+    const rulesCheckHelp = await runCommand("ocr", ["rules", "check", "--help"], { cwd: repoRoot });
     const previewFormat = /--format/.test(previewHelp.stdout + previewHelp.stderr);
     const ruleFormat = /--format/.test(ruleHelp.stdout + ruleHelp.stderr);
+    const scanPreviewFormat = /--preview/.test(scanHelp.stdout + scanHelp.stderr) && /--format/.test(scanHelp.stdout + scanHelp.stderr);
+    const rulesCheckSupported = /<file-path>/.test(rulesCheckHelp.stdout + rulesCheckHelp.stderr);
     const data = {
-      ok: previewFormat && ruleFormat,
+      ok: previewFormat && ruleFormat && scanPreviewFormat && rulesCheckSupported,
       repo_root: repoRoot,
       git_version: git.stdout.trim(),
       ocr_version: ocr.stdout.trim(),
       delegate_preview_json_supported: previewFormat,
-      delegate_rule_json_supported: ruleFormat
+      delegate_rule_json_supported: ruleFormat,
+      scan_preview_json_supported: scanPreviewFormat,
+      rules_check_supported: rulesCheckSupported
     };
-    return result(data, data.ok ? "OCR delegation adapter is ready." : "OCR is present, but delegation JSON support was not detected for both preview and rule.");
+    return result(data, data.ok ? "OCR delegation adapter is ready." : "OCR is present, but full support was not detected for delegate preview/rule, scan preview, and rules check.");
   }
 );
 
@@ -135,6 +148,62 @@ server.registerTool(
     const completed = await runCommand("ocr", args, { cwd: repoRoot });
     const rules = parseJson(completed.stdout, "ocr delegate rule");
     return result({ rules }, "OCR review rules resolved.");
+  }
+);
+
+server.registerTool(
+  "scan_delegate_preview",
+  {
+    title: "Preview OCR full-file scan scope",
+    description: "Call OCR full-file scan preview to deterministically select files for a whole-repository or whole-directory review (no diff required, no LLM call). Use this instead of ocr_delegate_preview when the request is a general/full-file review rather than a diff review.",
+    inputSchema: {
+      path: z.string().optional(),
+      exclude: z.string().optional(),
+      background: z.string().optional()
+    },
+    outputSchema: {
+      scan: z
+        .object({
+          files: z.array(z.unknown()),
+          total_files: z.number(),
+          reviewable_count: z.number(),
+          excluded_count: z.number()
+        })
+        .passthrough()
+    },
+    annotations: READ_ONLY
+  },
+  async (input) => {
+    const args = buildScanPreviewArgs(input);
+    args.push("--repo", repoRoot);
+    const completed = await runCommand("ocr", args, { cwd: repoRoot });
+    const scan = parseJson(completed.stdout, "ocr scan --preview");
+    if (!Array.isArray(scan.files)) {
+      throw new Error("OCR scan preview is missing files");
+    }
+    return result({ scan }, `OCR selected ${scan.reviewable_count ?? scan.files.length} of ${scan.total_files ?? scan.files.length} scannable file entries.`);
+  }
+);
+
+server.registerTool(
+  "ocr_rules_check",
+  {
+    title: "Check OCR review rule for one file",
+    description: "Show which OCR review rule layer and pattern applies to a single repository-relative file path. Useful for debugging why a file was included/excluded or which standard it is held to.",
+    inputSchema: {
+      path: z.string(),
+      rule: z.string().optional()
+    },
+    outputSchema: {
+      output: z.string()
+    },
+    annotations: READ_ONLY
+  },
+  async ({ path: filePath, rule }) => {
+    const args = buildRulesCheckArgs(filePath, rule);
+    args.splice(2, 0, "--repo", repoRoot);
+    const completed = await runCommand("ocr", args, { cwd: repoRoot });
+    return result({ output: completed.stdout }, `Resolved OCR rule for ${filePath}.`);
   }
 );
 
