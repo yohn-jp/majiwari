@@ -63,19 +63,26 @@ resource "cloudflare_zero_trust_access_policy" "mcp" {
   name       = "Allow Majiwari MCP clients"
   decision   = "allow"
 
-  include = length(var.mcp_access_allowed_email_domains) == 0 ? [{ everyone = {} }] : [
-    for domain in var.mcp_access_allowed_email_domains : { email_domain = { domain = domain } }
-  ]
+  include = (
+    length(var.mcp_access_allowed_email_domains) == 0 && length(var.mcp_access_allowed_emails) == 0
+    ? [{ everyone = {} }]
+    : concat(
+      [for domain in var.mcp_access_allowed_email_domains : { email_domain = { domain = domain } }],
+      [for address in var.mcp_access_allowed_emails : { email = { email = address } }]
+    )
+  )
 }
 
 # The public Managed OAuth boundary for the Majiwari MCP endpoint. Distinct
 # from cloudflare_zero_trust_access_application.gateway, which protects the
 # private Tunnel origin behind this Worker; that boundary is unaffected here.
 resource "cloudflare_zero_trust_access_application" "mcp" {
-  account_id = var.cloudflare_account_id
-  name       = "Majiwari MCP"
-  domain     = var.public_mcp_hostname
-  type       = "mcp"
+  account_id                = var.cloudflare_account_id
+  name                      = "Majiwari MCP"
+  domain                    = var.public_mcp_hostname
+  type                      = "mcp"
+  allowed_idps              = length(var.mcp_access_allowed_idps) > 0 ? var.mcp_access_allowed_idps : null
+  auto_redirect_to_identity = length(var.mcp_access_allowed_idps) == 1 ? true : null
 
   policies = [{
     id         = cloudflare_zero_trust_access_policy.mcp.id
