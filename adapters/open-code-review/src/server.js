@@ -49,6 +49,14 @@ server.registerTool(
     title: "Check OCR delegation adapter",
     description: "Verify the configured repository, Git, OCR CLI, and delegation JSON support before starting a delegated review.",
     inputSchema: {},
+    outputSchema: {
+      ok: z.boolean(),
+      repo_root: z.string(),
+      git_version: z.string(),
+      ocr_version: z.string(),
+      delegate_preview_json_supported: z.boolean(),
+      delegate_rule_json_supported: z.boolean()
+    },
     annotations: READ_ONLY
   },
   async () => {
@@ -82,6 +90,14 @@ server.registerTool(
       exclude: z.string().optional(),
       background: z.string().optional()
     },
+    outputSchema: {
+      preview: z
+        .object({
+          schema_version: z.string(),
+          reviewable_files: z.array(z.unknown())
+        })
+        .passthrough()
+    },
     annotations: READ_ONLY
   },
   async (input) => {
@@ -108,6 +124,9 @@ server.registerTool(
       paths: z.array(z.string()).min(1).max(500),
       rule: z.string().optional()
     },
+    outputSchema: {
+      rules: z.unknown()
+    },
     annotations: READ_ONLY
   },
   async ({ paths, rule }) => {
@@ -132,6 +151,11 @@ server.registerTool(
       commit: z.string().optional(),
       workspace_source: z.enum(["tracked", "untracked"]).optional()
     },
+    outputSchema: {
+      kind: z.enum(["file", "diff"]),
+      path: z.string(),
+      content: z.string()
+    },
     annotations: READ_ONLY
   },
   async ({ mode, path: filePath, merge_base: mergeBase, to, commit, workspace_source: workspaceSource }) => {
@@ -155,6 +179,12 @@ server.registerTool(
       start_line: z.number().int().positive().optional(),
       end_line: z.number().int().positive().optional()
     },
+    outputSchema: {
+      path: z.string(),
+      content: z.string(),
+      start_line: z.number().int().positive().optional(),
+      end_line: z.number().int().positive().optional()
+    },
     annotations: READ_ONLY
   },
   async ({ path: filePath, start_line: startLine, end_line: endLine }) => {
@@ -171,6 +201,10 @@ server.registerTool(
     inputSchema: {
       query: z.string().min(1),
       paths: z.array(z.string()).max(50).optional()
+    },
+    outputSchema: {
+      matches: z.string(),
+      found: z.boolean()
     },
     annotations: READ_ONLY
   },
