@@ -6,6 +6,7 @@ Exposes the local `gateway/` process to Cloudflare without opening an inbound po
 
 - a Cloudflare account with a zone (domain) you control
 - `cloudflared` installed locally
+- Terraform 1.5 or newer
 - the Majiwari gateway running locally (see [`gateway/README` usage](../../../gateway) or `npm run gateway -- --port 8787 -- node adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository`)
 
 ## 1. Authenticate
@@ -32,9 +33,27 @@ cloudflared tunnel route dns majiwari-gateway majiwari-gateway.internal.example.
 
 Use an internal-looking hostname under a zone you control. This hostname is the Worker's private origin -- it is never given to ChatGPT or any other MCP client directly.
 
-## 4. Configure ingress
+## 4. Provision the Access boundary
 
-Create `~/.cloudflared/config.yml` (do not commit this file; keep it outside the repository or in a git-ignored local path):
+Run [`deployments/cloudflare/terraform`](../terraform/README.md) with the exact hostname from step 3. It creates:
+
+- a self-hosted Cloudflare Access application for the Tunnel hostname
+- a dedicated Service Token for this Worker
+- a `non_identity` Service Auth policy whose only include rule is that Service Token
+
+The Terraform API token needs `Access: Apps and Policies Write` and `Access: Service Tokens Write`. Keep Terraform state encrypted or remote because it contains the generated Service Token secret.
+
+Set the two Worker secrets from Terraform output. The commands pipe values directly to Wrangler; do not print, log, or commit them:
+
+```bash
+cd deployments/cloudflare/worker
+terraform -chdir=../terraform output -raw worker_access_client_id | npx wrangler secret put GATEWAY_ACCESS_CLIENT_ID
+terraform -chdir=../terraform output -raw worker_access_client_secret | npx wrangler secret put GATEWAY_ACCESS_CLIENT_SECRET
+```
+
+## 5. Configure ingress
+
+Copy [`tunnel/config.example.yml`](../tunnel/config.example.yml) to `~/.cloudflared/config.yml` (do not commit this file), then replace its placeholders with the Tunnel UUID, hostname, Access team name, and Terraform output `access_application_audience_tag`:
 
 ```yaml
 tunnel: <UUID from step 2>
@@ -43,12 +62,24 @@ credentials-file: /home/you/.cloudflared/<UUID>.json
 ingress:
   - hostname: majiwari-gateway.internal.example.com
     service: http://127.0.0.1:8787
+    originRequest:
+      access:
+        required: true
+        teamName: <Cloudflare Access team name>
+        audTag:
+          - <Access application audience tag>
   - service: http_status:404
 ```
 
-The port must match the gateway's `--port` (see `gateway/src/server.js`).
+The `access` block must remain under this hostname's ingress rule. `cloudflared` uses it to validate the `Cf-Access-Jwt-Assertion` header for the protected route before proxying to the gateway. The port must match the gateway's `--port` (see `gateway/src/server.js`).
 
-## 5. Run the tunnel
+Validate the ingress configuration before starting the tunnel:
+
+```bash
+cloudflared tunnel ingress validate --config ~/.cloudflared/config.yml
+```
+
+## 6. Run the tunnel
 
 ```bash
 cloudflared tunnel --config ~/.cloudflared/config.yml run majiwari-gateway
@@ -56,20 +87,30 @@ cloudflared tunnel --config ~/.cloudflared/config.yml run majiwari-gateway
 
 Keep this running alongside the gateway process. Both are local-machine, outbound-only processes; neither opens an inbound firewall port.
 
-## 6. Verify
+## 7. Verify
 
-From a network outside the local machine, confirm the hostname resolves and an MCP client can reach it directly (before adding the Worker/OAuth layer in front of it):
+From a network outside the local machine, verify that an unauthenticated client cannot reach the gateway directly:
 
 ```bash
-curl -s -X POST https://majiwari-gateway.internal.example.com/mcp \
+curl -i -X POST https://majiwari-gateway.internal.example.com/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-06-18","capabilities":{},"clientInfo":{"name":"curl-check","version":"0.0.0"}}}'
 ```
 
-A JSON-RPC response confirms the Tunnel is correctly forwarding to the gateway. Once confirmed, move on to [`WORKER.md`](WORKER.md) -- production traffic should go through the Worker's OAuth-protected `/mcp`, not this hostname directly.
+Expect HTTP `401` or `403`; the request must not reach the local gateway. A request with only the Worker's configured Service Token is the authorized origin path, and the Worker supplies that token server-side. End-user traffic must go through the Worker's OAuth-protected `/mcp`, not this hostname directly. Verify that path with the same MCP request and an OAuth access token:
+
+```bash
+curl -i -X POST https://<worker-hostname>/mcp \
+  -H "authorization: Bearer ${MCP_ACCESS_TOKEN}" \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-06-18","capabilities":{},"clientInfo":{"name":"curl-check","version":"0.0.0"}}}'
+```
+
+A successful MCP response confirms Worker OAuth, Service Token injection, and Tunnel Access validation are connected.
 
 ## Secrets
 
 - Tunnel credentials JSON: stays on the local machine (`~/.cloudflared/`), never committed, never handed to the Worker.
-- No token or secret related to the Tunnel is stored in this repository.
+- Access Service Token credentials: stored only as Wrangler secrets on the Worker and in protected Terraform state; never stored in repository files or logs.
