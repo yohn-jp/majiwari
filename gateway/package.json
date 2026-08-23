@@ -1,0 +1,21 @@
+{
+  "name": "@majiwari/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generic stdio MCP to Streamable HTTP transport gateway. No OCR-specific or adapter-specific logic.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check test/server.test.js && node --check fixtures/echo-server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "devDependencies": {
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@majiwari/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker: public /mcp entry point, OAuth enforcement, and proxy to the Majiwari gateway over a Named Tunnel.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.10.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260823.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.125.0"
+  }
+}

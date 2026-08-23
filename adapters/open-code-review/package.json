@@ -1,5 +1,5 @@
 {
-  "name": "@open-code-review-chatgpt/adapter",
+  "name": "@majiwari/adapter-open-code-review",
   "version": "0.1.0",
   "private": true,
   "type": "module",

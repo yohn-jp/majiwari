@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "majiwari-mcp-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // Required by @cloudflare/workers-oauth-provider for Client ID Metadata
+  // Document support (see deployments/cloudflare/docs/OAUTH.md).
+  "compatibility_flags": ["global_fetch_strictly_public"],
+
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      // Replace with `wrangler kv namespace create OAUTH_KV`'s id before deploying.
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+
+  "vars": {
+    // Internal Tunnel-only origin for the gateway. Never expose this hostname
+    // to clients. Replace with the actual cloudflared-issued hostname.
+    "GATEWAY_ORIGIN": "https://majiwari-gateway.internal.example/mcp"
+  }
+}
