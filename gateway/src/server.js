@@ -56,8 +56,65 @@ export function bridgeTransports(stdioTransport, httpTransport) {
 export async function createGateway({ command, args = [], host = "127.0.0.1", port }) {
   if (!command) throw new Error("gateway requires a target stdio MCP command (--command, positional arg, or MAJIWARI_TARGET_COMMAND)");
 
-  const stdioTransport = new StdioClientTransport({ command, args });
   const sessions = new Map();
+  const activeSessions = new Set();
+  let closing = false;
+  let closePromise;
+
+  function createSession() {
+    let session;
+    const stdioTransport = new StdioClientTransport({ command, args });
+    const httpTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        session.sessionId = id;
+        sessions.set(id, session);
+      },
+      onsessionclosed: async () => {
+        await closeSession(session);
+      }
+    });
+
+    session = { httpTransport, stdioTransport, sessionId: undefined, closePromise: undefined, closed: false };
+    activeSessions.add(session);
+
+    httpTransport.onclose = () => {
+      void closeSession(session);
+    };
+    stdioTransport.onclose = () => {
+      void closeSession(session);
+    };
+    bridgeTransports(stdioTransport, httpTransport);
+    return session;
+  }
+
+  function closeSession(session) {
+    if (session.closePromise) return session.closePromise;
+
+    session.closed = true;
+    if (session.sessionId !== undefined && sessions.get(session.sessionId) === session) {
+      sessions.delete(session.sessionId);
+    }
+    session.closePromise = Promise.resolve().then(async () => {
+      try {
+        await session.httpTransport.close();
+      } finally {
+        await session.stdioTransport.close();
+        activeSessions.delete(session);
+      }
+    });
+    return session.closePromise;
+  }
+
+  async function startSession(session) {
+    try {
+      await session.stdioTransport.start();
+      await session.httpTransport.start();
+    } catch (error) {
+      await closeSession(session);
+      throw error;
+    }
+  }
 
   const httpServer = createServer(async (req, res) => {
     if (req.url === "/health") {
@@ -70,29 +127,50 @@ export async function createGateway({ command, args = [], host = "127.0.0.1", po
     }
 
     const sessionId = req.headers["mcp-session-id"];
-    let httpTransport = sessionId ? sessions.get(sessionId) : undefined;
+    let session = sessionId ? sessions.get(sessionId) : undefined;
 
-    if (!httpTransport) {
-      httpTransport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => sessions.set(id, httpTransport)
-      });
-      httpTransport.onclose = () => {
-        if (httpTransport.sessionId) sessions.delete(httpTransport.sessionId);
-      };
-      bridgeTransports(stdioTransport, httpTransport);
-      await httpTransport.start();
+    if (sessionId && (!session || session.closed)) {
+      res.writeHead(404).end();
+      return;
     }
 
-    await httpTransport.handleRequest(req, res);
+    if (!session) {
+      if (closing) {
+        res.writeHead(503).end();
+        return;
+      }
+      session = createSession();
+      try {
+        await startSession(session);
+      } catch (error) {
+        if (!res.headersSent) res.writeHead(500).end();
+        else res.destroy(error);
+        return;
+      }
+    }
+
+    try {
+      await session.httpTransport.handleRequest(req, res);
+    } catch (error) {
+      await closeSession(session);
+      if (!res.headersSent) res.writeHead(500).end();
+      else res.destroy(error);
+      return;
+    }
+
+    if (session.httpTransport.sessionId === undefined) await closeSession(session);
   });
 
-  await stdioTransport.start();
-
   async function close() {
-    await new Promise((resolve) => httpServer.close(() => resolve()));
-    for (const transport of sessions.values()) await transport.close();
-    await stdioTransport.close();
+    if (closePromise) return closePromise;
+    closing = true;
+    closePromise = (async () => {
+      const results = await Promise.allSettled([...activeSessions].map((session) => closeSession(session)));
+      await new Promise((resolve) => httpServer.close(() => resolve()));
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
+    })();
+    return closePromise;
   }
 
   await new Promise((resolve, reject) => {
@@ -100,7 +178,7 @@ export async function createGateway({ command, args = [], host = "127.0.0.1", po
     httpServer.listen(port, host, resolve);
   });
 
-  return { httpServer, stdioTransport, close, port, host };
+  return { httpServer, close, port, host };
 }
 
 async function main() {
