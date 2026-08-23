@@ -28,6 +28,7 @@ cd open-code-review-chatgpt
 npm install
 npm test
 npm run check
+npm run doctor -- --repo /absolute/path/to/target-repository
 ```
 
 You can also inspect the CLI entry point:

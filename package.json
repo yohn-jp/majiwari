@@ -10,7 +10,8 @@
   "scripts": {
     "start": "npm --workspace adapter start --",
     "test": "npm --workspace adapter test",
-    "check": "npm --workspace adapter run check"
+    "check": "npm --workspace adapter run check",
+    "doctor": "npm --workspace adapter run doctor --"
   },
   "engines": {
     "node": ">=20"

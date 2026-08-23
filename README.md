@@ -49,6 +49,7 @@ cd open-code-review-chatgpt
 npm install
 npm test
 npm run check
+npm run doctor -- --repo /absolute/path/to/target-repository
 ```
 
 ## Run locally
