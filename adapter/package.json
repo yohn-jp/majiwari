@@ -1,0 +1,19 @@
+{
+  "name": "@open-code-review-chatgpt/adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only MCP adapter that exposes OpenCodeReview delegation mode to ChatGPT.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/core.js && node --check src/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
