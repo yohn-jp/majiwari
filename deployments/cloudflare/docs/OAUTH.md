@@ -13,8 +13,9 @@ An MCP client (ChatGPT) discovers authorization in two stages, per the [MCP auth
    ```
 3. Client fetches `/.well-known/oauth-protected-resource/mcp` -- identifies the authorization server via `authorization_servers`.
 4. Client fetches `/.well-known/oauth-authorization-server` -- RFC 8414 metadata: `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, supported grant types, PKCE methods.
-5. Client registers (if using dynamic client registration against `/oauth/register`) or uses a pre-configured client, then drives the user through `/authorize`.
-6. Client exchanges the authorization code at `/oauth/token` and calls `/mcp` with `Authorization: Bearer <token>`.
+5. Client registers (if using dynamic client registration against `/oauth/register`) or uses a pre-configured client, then drives the operator through Cloudflare Access and `/authorize`.
+6. The authenticated operator reviews the client and scopes and explicitly approves with `POST /authorize`.
+7. Client exchanges the authorization code at `/oauth/token` and calls `/mcp` with `Authorization: Bearer <token>`.
 
 None of this is implemented by hand in `src/index.ts` beyond the `/authorize` consent step -- `OAuthProvider` serves the `.well-known` documents, `/oauth/token`, and `/oauth/register` automatically from the constructor options.
 
@@ -23,7 +24,7 @@ None of this is implemented by hand in `src/index.ts` beyond the `/authorize` co
 In `src/index.ts`:
 
 - `apiRoute: "/mcp"` / `apiHandler: McpProxyHandler` -- every request to `/mcp` is validated against a bearer token before `McpProxyHandler.fetch` ever runs. The proxy handler itself does not parse or check tokens.
-- `authorizeEndpoint: "/authorize"` -- handled by `defaultHandler`, which is this repository's code. It validates the request (`parseAuthRequest`), confirms the client is known (`lookupClient`), and grants the v0 fixed operator identity (see [`WORKER.md`](WORKER.md#v0-authorization-model)).
+- `authorizeEndpoint: "/authorize"` -- handled by `defaultHandler`, which validates the request (`parseAuthRequest`), verifies the Cloudflare Access operator assertion, stores short-lived request-bound consent state, and calls `completeAuthorization` only after a CSRF-protected explicit approval (see [`WORKER.md`](WORKER.md#operator-authentication-and-consent)).
 - `tokenEndpoint`, `clientRegistrationEndpoint` -- served entirely by the library.
 - `scopesSupported: ["mcp:invoke"]` -- the only scope this deployment grants.
 
@@ -45,6 +46,8 @@ curl -s https://<worker-host>/.well-known/oauth-authorization-server | jq .
 
 Full authorization-code + token exchange is easiest to verify through an actual MCP client (ChatGPT, or `npx @modelcontextprotocol/inspector`) rather than by hand with `curl`, since it involves a browser redirect through `/authorize` and PKCE. See [`CHATGPT_SETUP.md`](../../../docs/CHATGPT_SETUP.md) for the ChatGPT-side registration steps.
 
+For MCP Inspector, configure the deployed Worker as the MCP URL, start the Inspector authorization flow, sign in as the configured Access operator, approve the displayed client and `mcp:invoke` scope, and confirm the Inspector receives both access and refresh tokens. A direct `/authorize` request without a valid Access assertion or a POST without the issued consent cookie/state is rejected.
+
 ## Secrets
 
-No third-party identity provider secret exists in v0 (see [`WORKER.md`](WORKER.md#v0-authorization-model)). `OAUTH_KV` holds the provider's own state (clients, grants, tokens) and is never read or written directly by this repository's code outside the `OAuthHelpers` interface the library provides. Nothing OAuth-related is committed to this repository.
+Cloudflare Access configuration contains no client secret in this Worker. `OAUTH_KV` holds the provider's clients, grants, and tokens. `CONSENT_STATE` holds the Worker's short-lived consent state and atomically consumes each state through Durable Object storage transactions. Nothing OAuth-related is committed to this repository.

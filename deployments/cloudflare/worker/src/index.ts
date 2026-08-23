@@ -1,21 +1,43 @@
-import { OAuthProvider, type AuthRequest } from "@cloudflare/workers-oauth-provider";
+import { AuthorizationError, OAuthProvider, type AuthRequest } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { authenticateOperator } from "./access";
+import {
+  clearConsentCookie,
+  consumeConsentState,
+  createConsentState,
+  isValidConsentSubmission,
+  loadConsentState,
+  parseConsentForm,
+  renderConsentPage
+} from "./consent";
 import { buildProxyTarget, filterHeaders, withServiceToken } from "./proxy";
 import { isPublicRoute } from "./routes";
+
+export { ConsentStateDurableObject } from "./consent";
 
 export interface Env {
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: import("@cloudflare/workers-oauth-provider").OAuthHelpers;
+  CONSENT_STATE: DurableObjectNamespace;
   /** Tunnel-internal origin for the Majiwari gateway. Never exposed to clients. */
   GATEWAY_ORIGIN: string;
   /** Cloudflare Access service-token client ID. Provision with `wrangler secret put`. */
   GATEWAY_ACCESS_CLIENT_ID: string;
   /** Cloudflare Access service-token client secret. Provision with `wrangler secret put`. */
   GATEWAY_ACCESS_CLIENT_SECRET: string;
+  /** Cloudflare Access team issuer, for example https://team.cloudflareaccess.com. */
+  ACCESS_TEAM_DOMAIN: string;
+  /** Cloudflare Access application audience tag. */
+  ACCESS_AUDIENCE: string;
+  /** Email address allowed to approve the single-operator grant. */
+  OPERATOR_EMAIL: string;
+  /** Optional override for the Access certificate endpoint, useful for controlled deployments. */
+  ACCESS_CERTS_URL?: string;
 }
 
 interface AuthProps {
   userId: string;
+  operatorEmail: string;
   [key: string]: unknown;
 }
 
@@ -45,7 +67,41 @@ export class McpProxyHandler extends WorkerEntrypoint<Env, AuthProps> {
   }
 }
 
-const defaultHandler: ExportedHandler<Env> = {
+function oauthErrorResponse(error: unknown): Response {
+  if (error instanceof AuthorizationError && error.redirectUri) {
+    const redirect = new URL(error.redirectUri);
+    redirect.searchParams.set("error", error.code);
+    redirect.searchParams.set("error_description", error.description);
+    if (error.state) redirect.searchParams.set("state", error.state);
+    if (error.issuer) redirect.searchParams.set("iss", error.issuer);
+    return Response.redirect(redirect.toString(), 302);
+  }
+
+  const description = error instanceof AuthorizationError ? error.description : error instanceof Error ? error.message : "invalid authorization request";
+  return new Response(description, { status: 400 });
+}
+
+function accessDeniedResponse(request: AuthRequest): Response {
+  const redirect = new URL(request.redirectUri);
+  redirect.searchParams.set("error", "access_denied");
+  redirect.searchParams.set("error_description", "operator denied access");
+  redirect.searchParams.set("state", request.state);
+  if (request.issuer) redirect.searchParams.set("iss", request.issuer);
+  return oauthRedirectResponse(redirect.toString());
+}
+
+function oauthRedirectResponse(location: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { "Cache-Control": "no-store", Location: location }
+  });
+}
+
+function operatorUserId(subject: string): string {
+  return `access-${encodeURIComponent(subject)}`;
+}
+
+export const defaultHandler: ExportedHandler<Env> = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const route = isPublicRoute(url.pathname);
@@ -58,31 +114,63 @@ const defaultHandler: ExportedHandler<Env> = {
       return new Response("Not found", { status: 404 });
     }
 
-    let oauthRequest: AuthRequest;
-    try {
-      oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
-    } catch (error) {
-      return new Response(error instanceof Error ? error.message : "invalid authorization request", { status: 400 });
+    if (request.method !== "GET" && request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, POST" } });
     }
 
-    const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
-    if (!client) {
-      return new Response("Unknown OAuth client", { status: 400 });
+    const operator = await authenticateOperator(request, env);
+    if (!operator) {
+      return new Response("Operator authentication or policy check failed", {
+        status: 403,
+        headers: { "Cache-Control": "no-store" }
+      });
     }
 
-    // v0 self-host: the deploying operator is the only authorized user.
-    // Replace with a real identity/consent step before granting multi-user access.
-    const user = { id: "self-hosted-operator" };
+    if (request.method === "GET") {
+      let oauthRequest: AuthRequest;
+      try {
+        oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+      } catch (error) {
+        return oauthErrorResponse(error);
+      }
+
+      const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
+      if (!client) return new Response("Unknown OAuth client", { status: 400 });
+
+      const consent = await createConsentState(env.CONSENT_STATE, oauthRequest, operator);
+      return renderConsentPage(client, oauthRequest.scope, consent.state, consent.csrfToken);
+    }
+
+    const form = await parseConsentForm(request);
+    if (!form) return new Response("Invalid consent submission", { status: 400 });
+
+    const consent = await loadConsentState(env.CONSENT_STATE, form.state);
+    if (!consent) return new Response("Invalid or expired consent state", { status: 400 });
+    if (!isValidConsentSubmission(request, form, consent, operator)) return new Response("Invalid consent state", { status: 400 });
+
+    const consumedConsent = await consumeConsentState(env.CONSENT_STATE, form.state, form.csrfToken, operator);
+    if (!consumedConsent) return new Response("Invalid, expired, or already consumed consent state", { status: 400 });
+
+    if (form.decision === "deny") {
+      const response = accessDeniedResponse(consumedConsent.request);
+      clearConsentCookie(response.headers);
+      return response;
+    }
+
+    const client = await env.OAUTH_PROVIDER.lookupClient(consumedConsent.clientId);
+    if (!client) return new Response("Unknown OAuth client", { status: 400 });
 
     const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
-      request: oauthRequest,
-      userId: user.id,
-      metadata: { clientName: client.clientName },
-      scope: oauthRequest.scope,
-      props: { userId: user.id }
+      request: consumedConsent.request,
+      userId: operatorUserId(operator.subject),
+      metadata: { clientName: client.clientName, operatorEmail: operator.email },
+      scope: consumedConsent.request.scope,
+      props: { userId: operatorUserId(operator.subject), operatorEmail: operator.email }
     });
 
-    return Response.redirect(redirectTo, 302);
+    const response = oauthRedirectResponse(redirectTo);
+    clearConsentCookie(response.headers);
+    return response;
   }
 };
 
