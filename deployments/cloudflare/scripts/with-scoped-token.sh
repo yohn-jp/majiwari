@@ -96,10 +96,21 @@ fi
 token_id=$(echo "$create_response" | jq -r '.result.id')
 token_value=$(echo "$create_response" | jq -r '.result.value')
 
+revoked=0
 cleanup() {
+  [ "$revoked" -eq 0 ] || return 0
+  revoked=1
   curl -sS -X DELETE "$api/accounts/$account_id/tokens/$token_id" \
     -H "Authorization: Bearer $standing_token" > /dev/null
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
-CLOUDFLARE_API_TOKEN="$token_value" "$@"
+status=0
+CLOUDFLARE_API_TOKEN="$token_value" "$@" || status=$?
+
+if ! cleanup; then
+  echo "warning: failed to revoke scoped token $token_id -- revoke it manually" >&2
+  [ "$status" -ne 0 ] || status=1
+fi
+
+exit "$status"
