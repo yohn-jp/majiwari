@@ -1,19 +1,15 @@
 {
   "name": "@majiwari/gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Generic stdio MCP to Streamable HTTP transport gateway. No OCR-specific or adapter-specific logic.",
+  "description": "Generic stdio MCP to Streamable HTTP transport gateway. No OCR-specific or adapter-specific logic. Thin wrapper around mcp-proxy (https://github.com/punkpeye/mcp-proxy).",
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node --test",
-    "check": "node --check src/server.js && node --check test/server.test.js && node --check fixtures/echo-server.js && node --check fixtures/lifecycle-server.js"
+    "start": "node bin/gateway.mjs",
+    "check": "node --check bin/gateway.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0"
-  },
-  "devDependencies": {
-    "zod": "4.4.3"
+    "mcp-proxy": "6.7.10"
   },
   "engines": {
     "node": ">=20"
