@@ -62,7 +62,8 @@ describe("withServiceToken", () => {
       "mcp-session-id": "abc-123",
       authorization: "Bearer client-token",
       "cf-access-client-id": "client-id",
-      "cf-access-client-secret": "client-secret"
+      "cf-access-client-secret": "client-secret",
+      cookie: "CF_Authorization=browser-token; theme=dark"
     });
 
     const upstream = withServiceToken(source, "worker-client-id", "worker-client-secret");
@@ -73,6 +74,7 @@ describe("withServiceToken", () => {
     expect(upstream.get("cf-access-client-id")).toBe("worker-client-id");
     expect(upstream.get("cf-access-client-secret")).toBe("worker-client-secret");
     expect(upstream.get("authorization")).toBe(null);
+    expect(upstream.get("cookie")).toBe("theme=dark");
   });
 
   it("fails closed when either service-token secret is missing", () => {

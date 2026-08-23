@@ -23,10 +23,29 @@ function isAuthenticationHeader(name: string): boolean {
   return AUTHENTICATION_HEADERS.has(normalized) || normalized.startsWith("cf-access-");
 }
 
+function filterCookies(value: string): string | null {
+  const cookies = value
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => cookie.length > 0)
+    .filter((cookie) => {
+      const separator = cookie.indexOf("=");
+      const name = (separator === -1 ? cookie : cookie.slice(0, separator)).trim();
+      return name.toLowerCase() !== "cf_authorization";
+    });
+
+  return cookies.length > 0 ? cookies.join("; ") : null;
+}
+
 export function filterHeaders(source: Headers): Headers {
   const filtered = new Headers();
   for (const [key, value] of source) {
     const normalized = key.toLowerCase();
+    if (normalized === "cookie") {
+      const cookies = filterCookies(value);
+      if (cookies) filtered.set(key, cookies);
+      continue;
+    }
     if (!HOP_BY_HOP_HEADERS.has(normalized) && !isAuthenticationHeader(normalized)) {
       filtered.set(key, value);
     }
