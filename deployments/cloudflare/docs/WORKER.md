@@ -45,7 +45,21 @@ The values come from the Terraform outputs described in [`TUNNEL.md`](TUNNEL.md)
 
 Edit `src/index.ts`'s `resourceMetadata.resource` and `resourceMetadata.authorization_servers[0]` to this Worker's actual public hostname (the one you'll register in ChatGPT), e.g. `https://mcp.example.com`. This is compiled into the Worker at deploy time, not read from an environment variable -- `OAuthProvider`'s configuration is constructed at module load, before any request's `env` exists.
 
-## 5. Deploy
+## 5. Configure Cloudflare Access for the operator
+
+Create a Cloudflare Access self-hosted application for the Worker's public hostname with path `/authorize*`. Add one `Allow` policy for the operator's email address and no policy for any other identity. The Access application audience tag is not a secret, but it must match the Worker configuration.
+
+Set these `vars` in `wrangler.jsonc`:
+
+```jsonc
+"ACCESS_TEAM_DOMAIN": "https://<team-name>.cloudflareaccess.com",
+"ACCESS_AUDIENCE": "<Access-application-aud-tag>",
+"OPERATOR_EMAIL": "operator@example.com"
+```
+
+The Worker validates `Cf-Access-Jwt-Assertion` against the Access certificate endpoint, issuer, audience, expiry, and configured email. A missing, invalid, or disallowed assertion receives no consent state and cannot reach `completeAuthorization()`. Keep the Access application path-scoped so OAuth token and discovery endpoints remain owned by the OAuth Provider.
+
+## 6. Deploy
 
 ```bash
 npm install
@@ -54,7 +68,7 @@ npm run deploy
 
 `wrangler deploy` prints the deployed Worker's `*.workers.dev` URL, or your configured custom domain if `wrangler.jsonc` has a `routes` entry.
 
-## 6. Verify
+## 7. Verify
 
 ```bash
 curl -s https://<worker-hostname>/health
@@ -66,14 +80,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<worker-hostname>/mcp
 
 An unauthenticated request to `/mcp` must return `401` with a `WWW-Authenticate: Bearer ...` challenge pointing at `/.well-known/oauth-protected-resource/mcp`. See [`OAUTH.md`](OAUTH.md) for the full authorization flow and how to verify a request succeeds after authorization.
 
-## v0 authorization model
+## Operator authentication and consent
 
-This Worker's `/authorize` handler grants access to a single fixed operator identity (`self-hosted-operator`) without a separate identity provider -- see `src/index.ts`. This matches the v0 self-host scope: the person who deploys the Worker is its only intended user. There is no username/password or third-party login step, and no additional secret to provision for it.
+An authenticated Access request to `GET /authorize` validates the OAuth request and known client, then displays the client ID, client name, and requested scopes. The operator must submit an explicit `Approve` action. `POST /authorize` requires the one-use consent state, a CSRF token in both the form and an HttpOnly cookie, and the same Access subject that opened the page. `Deny` redirects with `access_denied` and creates no grant.
 
-Before granting access to more than one person, replace that handler with a real authentication and consent step (see the `AuthProps`/`completeAuthorization` call in `src/index.ts` and the [`@cloudflare/workers-oauth-provider` README](https://github.com/cloudflare/workers-oauth-provider) for the extension points). That is out of scope for v0.
+The OAuth Provider remains responsible for request validation, PKCE, authorization codes, access and refresh tokens, refresh-token rotation, DCR/CIMD, and bearer validation. This Worker only owns Access identity verification and consent.
 
 ## Secrets and configuration
 
-- `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` are Wrangler secrets created in step 3. They are not present in repository files or Worker responses.
-- `OAUTH_KV` holds provider-managed state (registered clients, grants, and tokens) as a binding, not a secret value.
-- `GATEWAY_ORIGIN` and the KV namespace ID are deployment configuration. Review them before publishing a fork; neither replaces the Worker Access secrets.
+- `GATEWAY_ACCESS_CLIENT_ID` and `GATEWAY_ACCESS_CLIENT_SECRET` are Wrangler secrets created in step 3, authenticating the Worker to the Tunnel-protected gateway origin. They are not present in repository files or Worker responses.
+- `ACCESS_TEAM_DOMAIN`, `ACCESS_AUDIENCE`, and `OPERATOR_EMAIL` (step 5) are not secrets in the `wrangler secret put` sense -- Cloudflare Access authenticates the operator and the Worker only validates its assertion against them.
+- `OAUTH_KV` holds provider-managed state (registered clients, grants, and tokens) plus short-lived consent state, as a binding, not a secret value.
+- `GATEWAY_ORIGIN` and the KV namespace ID are deployment configuration. Review them before publishing a fork; neither replaces the Worker Access secrets. Never commit `wrangler.jsonc` with a filled-in KV namespace `id` from a shared/production account into a public fork without checking your organization's disclosure policy for resource IDs; the ID alone does not grant access without account credentials.
+- If a future auth provider is added, store its client secret with `npx wrangler secret put <NAME>`.
