@@ -1,35 +1,39 @@
-# OpenCodeReview for ChatGPT
+# Majiwari
 
-Use **Alibaba OpenCodeReview Delegation Mode** with ChatGPT as the host review model.
+Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any stdio MCP server remotely over Cloudflare. **Alibaba OpenCodeReview (OCR) delegation is the first adapter**, not the platform's purpose.
 
-> This project does not implement code review. OCR remains authoritative for deterministic file selection and rule resolution; ChatGPT performs only the review reasoning that OCR Delegation Mode delegates.
+> Adapters know what a tool means. The gateway knows only what MCP transport means. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Repository layout
+
+```text
+adapters/open-code-review/   deterministic MCP tools wrapping the ocr CLI (stdio)
+gateway/                     generic stdio MCP -> Streamable HTTP transport, no adapter-specific logic
+deployments/cloudflare/      Named Tunnel + Worker (/mcp proxy, OAuth) + their setup docs
+plugin/skills/                ChatGPT-facing Delegation Mode skill
+docs/                         architecture and ChatGPT connection docs
+```
 
 ## Architecture
 
 ```text
 ChatGPT
-  -> OpenAI Secure MCP Tunnel
-  -> local read-only stdio MCP adapter
-  -> OCR Delegation Mode + read-only Git context
+  -> Cloudflare Worker (/mcp, OAuth-protected, origin hidden)
+  -> Cloudflare Named Tunnel (outbound-only from the local machine)
+  -> gateway/ (generic stdio MCP -> Streamable HTTP)
+  -> adapters/open-code-review/ (deterministic MCP tools)
+  -> ocr CLI + read-only Git context
   -> target repository
 ```
 
-No public MCP hosting is required. OpenAI's Secure MCP Tunnel can launch the local stdio adapter directly and keep the repository/MCP server off the public internet.
-
-## Supported targets
-
-- current workspace changes
-- branch/range review
-- single commit review
-
-`ocr scan` / repository-wide scan is intentionally not exposed until OCR supports that path through Delegation Mode upstream.
+This project does not implement code review. OCR remains authoritative for deterministic file selection and rule resolution; the host LLM (ChatGPT) performs only the review reasoning that OCR Delegation Mode delegates.
 
 ## Requirements
 
 - Node.js 20+
 - Git 2.41+
 - Alibaba OpenCodeReview (`ocr`)
-- OpenAI `tunnel-client` and Secure MCP Tunnel access for ChatGPT connectivity
+- a Cloudflare account, for the Tunnel/Worker/OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
 
 Install OCR:
 
@@ -44,8 +48,8 @@ Delegation Mode does **not** require OCR LLM credentials.
 ## Install
 
 ```bash
-git clone https://github.com/yohn-jp/open-code-review-chatgpt.git
-cd open-code-review-chatgpt
+git clone https://github.com/yohn-jp/majiwari.git
+cd majiwari
 npm install
 npm test
 npm run check
@@ -54,42 +58,27 @@ npm run doctor -- --repo /absolute/path/to/target-repository
 
 ## Run locally
 
-Bind one adapter process to one target Git checkout:
+Start the OCR adapter directly (stdio MCP) against one target Git checkout:
 
 ```bash
 npm start -- --repo /absolute/path/to/target-repository
 ```
 
-Equivalent environment-variable form:
+Equivalent environment-variable form: `OCR_REPO=/absolute/path/to/target-repository npm start`.
+
+To make it reachable over HTTP, put the generic gateway in front of it:
 
 ```bash
-OCR_REPO=/absolute/path/to/target-repository npm start
+npm run gateway -- --port 8787 -- node adapters/open-code-review/src/server.js --repo /absolute/path/to/target-repository
 ```
 
-The server speaks MCP over stdio.
+The gateway binds to `127.0.0.1` only and never inspects the tools it proxies -- any other stdio MCP server can be given to it the same way.
 
-## Connect to ChatGPT with Secure MCP Tunnel
+## Connect to ChatGPT
 
-The shortest path is to let the official tunnel client launch the stdio adapter itself:
+See [`docs/CHATGPT_SETUP.md`](docs/CHATGPT_SETUP.md) for the full path: exposing the gateway through a Cloudflare Named Tunnel ([`deployments/cloudflare/docs/TUNNEL.md`](deployments/cloudflare/docs/TUNNEL.md)), deploying the Worker in front of it ([`deployments/cloudflare/docs/WORKER.md`](deployments/cloudflare/docs/WORKER.md)), and confirming OAuth ([`deployments/cloudflare/docs/OAUTH.md`](deployments/cloudflare/docs/OAUTH.md)) before registering the connector in ChatGPT.
 
-```bash
-export CONTROL_PLANE_API_KEY="<runtime-api-key>"
-
-tunnel-client init \
-  --sample sample_mcp_stdio_local \
-  --profile ocr-chatgpt \
-  --tunnel-id "<tunnel-id>" \
-  --mcp-command "node /absolute/path/to/open-code-review-chatgpt/adapter/src/server.js --repo /absolute/path/to/target-repository"
-
-tunnel-client doctor --profile ocr-chatgpt --explain
-tunnel-client run --profile ocr-chatgpt
-```
-
-Then create a ChatGPT custom MCP app in Developer Mode with **Connection: Tunnel** and select/enter that tunnel ID.
-
-See [`docs/SECURE_MCP_TUNNEL.md`](docs/SECURE_MCP_TUNNEL.md) for the complete setup.
-
-## MCP tools
+## MCP tools (`adapters/open-code-review`)
 
 | Tool | Responsibility |
 | --- | --- |
@@ -100,11 +89,11 @@ See [`docs/SECURE_MCP_TUNNEL.md`](docs/SECURE_MCP_TUNNEL.md) for the complete se
 | `repo_read_file` | read bounded repository context |
 | `repo_search` | fixed-string read-only Git search |
 
-There is deliberately no `review`, `fix`, `edit`, arbitrary `shell`, commit, or push tool.
+There is deliberately no `review`, `fix`, `edit`, arbitrary `shell`, commit, or push tool. The gateway and Worker layers do not add one either -- they carry these tool names/schemas through unmodified.
 
 ## Review contract
 
-For every delegated review, ChatGPT must:
+For every delegated review, the host LLM must:
 
 1. verify `adapter_health`;
 2. call OCR preview exactly once for the requested target;
@@ -116,13 +105,14 @@ The same contract is included in the MCP server instructions and in [`plugin/ski
 
 ## Security
 
-- fixed `ocr` / `git` executables only
-- argument arrays with `shell: false`
-- read-only MCP tools only
-- no repository mutation
+- fixed `ocr` / `git` executables only, `shell: false`, argument arrays
+- read-only MCP tools only, no repository mutation
 - path traversal / absolute path / symlink escape protection
 - unsafe Git refs and newline/NUL injection rejected
 - one configured repository per adapter process
+- gateway binds to `127.0.0.1` only; only the Tunnel is outbound
+- Worker enforces OAuth on `/mcp` and never exposes the Tunnel hostname to a client
+- no secret committed to this repository
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 

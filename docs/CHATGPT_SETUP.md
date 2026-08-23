@@ -1,62 +1,38 @@
 # ChatGPT setup
 
-This project uses **OpenAI Secure MCP Tunnel** as the default ChatGPT connection path. The adapter remains a local stdio MCP server; no public endpoint is required.
-
-## 1. Runtime prerequisites
-
-- Node.js 20+
-- Git 2.41+
-- current `ocr` CLI with Delegation Mode JSON output
-- target repository checked out locally
-- OpenAI `tunnel-client`
-- Secure MCP Tunnel ID + runtime API key
-
-```bash
-npm install -g @alibaba-group/open-code-review
-ocr --version
-ocr delegate preview --help
-ocr delegate rule --help
-```
-
-Both delegation commands must support `--format json`. OCR LLM configuration is unnecessary.
-
-## 2. Install and validate the adapter
-
-```bash
-git clone https://github.com/yohn-jp/open-code-review-chatgpt.git
-cd open-code-review-chatgpt
-npm install
-npm test
-npm run check
-npm run doctor -- --repo /absolute/path/to/target-repository
-```
-
-You can also inspect the CLI entry point:
-
-```bash
-node adapter/src/server.js --help
-```
-
-## 3. Configure Secure MCP Tunnel
-
-See [`SECURE_MCP_TUNNEL.md`](SECURE_MCP_TUNNEL.md). Use the official stdio sample and set the MCP command to:
+ChatGPT connects to a public Cloudflare Worker URL, not to a local process directly. The full path is:
 
 ```text
-node /absolute/path/to/open-code-review-chatgpt/adapter/src/server.js --repo /absolute/path/to/target-repository
+ChatGPT -> Cloudflare Worker (/mcp, OAuth) -> Cloudflare Named Tunnel -> gateway/ -> adapters/open-code-review/ -> ocr CLI
 ```
 
-## 4. Create the ChatGPT app
+Complete the earlier setup steps first, in order:
 
-In ChatGPT Developer Mode, create a custom MCP app using **Connection: Tunnel**, and select/enter the configured tunnel ID. Keep `tunnel-client run --profile ocr-chatgpt` running while discovering and using the app.
+1. [`README.md`](../README.md) -- install, run the OCR adapter locally, run the gateway locally
+2. [`deployments/cloudflare/docs/TUNNEL.md`](../deployments/cloudflare/docs/TUNNEL.md) -- expose the gateway via a Named Tunnel
+3. [`deployments/cloudflare/docs/WORKER.md`](../deployments/cloudflare/docs/WORKER.md) -- deploy the Worker in front of the Tunnel
+4. [`deployments/cloudflare/docs/OAUTH.md`](../deployments/cloudflare/docs/OAUTH.md) -- confirm OAuth is enforced
 
-## 5. First validation
+Only after step 4 succeeds (unauthenticated `/mcp` returns `401`, and `.well-known` discovery documents are served) should you register the Worker with ChatGPT.
 
-Run these cases in order:
+## Register the connector
+
+1. In ChatGPT (web), go to **Settings -> Apps -> Advanced settings** and enable **Developer mode**. Developer mode requires a Pro, Plus, Business, Enterprise, or Education account.
+2. Choose **Add custom connector**.
+3. Under **Connection**, enter the Worker's MCP URL, including the `/mcp` path: `https://<worker-hostname>/mcp`.
+4. ChatGPT performs OAuth discovery against that URL (see [`OAUTH.md`](../deployments/cloudflare/docs/OAUTH.md#discovery-flow)) and prompts you to complete the `/authorize` flow.
+5. Enable the connector for your conversation.
+
+Do not register the Tunnel's internal hostname (`GATEWAY_ORIGIN`) directly with ChatGPT -- it is unauthenticated and is meant to stay behind the Worker.
+
+## First validation
+
+Run these cases in order, in a conversation with the connector enabled and the [`open-code-review-delegate`](../plugin/skills/open-code-review-delegate/SKILL.md) skill available:
 
 1. `adapter_health`
 2. workspace review with one tracked edit and one untracked file
-3. `main` → feature branch range review
+3. `main` -> feature branch range review
 4. single-commit review
-5. malicious path/ref inputs to confirm fail-closed validation
+5. malicious path/ref inputs, to confirm the adapter's fail-closed validation still holds through the gateway and Worker
 
-A valid review must complete without OCR model credentials and account for every OCR preview `(path,status)` entry.
+A valid review completes without OCR LLM credentials and accounts for every OCR preview `(path, status)` entry (see the skill's coverage requirement).

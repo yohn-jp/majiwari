@@ -1,17 +1,20 @@
 {
-  "name": "open-code-review-chatgpt",
+  "name": "majiwari",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ChatGPT host adapter for Alibaba OpenCodeReview Delegation Mode.",
+  "description": "Deterministic CLI/API-to-MCP adapters and a generic stdio-to-remote-MCP gateway. OpenCodeReview delegation is the first adapter.",
   "workspaces": [
-    "adapter"
+    "adapters/open-code-review",
+    "gateway",
+    "deployments/cloudflare/worker"
   ],
   "scripts": {
-    "start": "npm --workspace adapter start --",
-    "test": "npm --workspace adapter test",
-    "check": "npm --workspace adapter run check",
-    "doctor": "npm --workspace adapter run doctor --"
+    "start": "npm --workspace @majiwari/adapter-open-code-review start --",
+    "gateway": "npm --workspace @majiwari/gateway start --",
+    "test": "npm test --workspaces",
+    "check": "npm run check --workspaces",
+    "doctor": "npm --workspace @majiwari/adapter-open-code-review run doctor --"
   },
   "engines": {
     "node": ">=20"
