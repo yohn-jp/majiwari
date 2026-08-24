@@ -98,6 +98,21 @@ test("a failed adapter's state is visible over the API without breaking a health
   });
 });
 
+test("a stopped adapter's state is represented accurately over the API", async () => {
+  const registry = new AdapterRegistry();
+  registry.register(createFixtureManifest("fixture-a"));
+  await registry.start("fixture-a");
+  await registry.stop("fixture-a");
+
+  await withServer(registry, async (base) => {
+    const response = await fetch(`${base}/api/adapters/fixture-a`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.state, "stopped");
+    assert.ok(body.stoppedAt);
+  });
+});
+
 test("serves the static shell", async () => {
   const registry = new AdapterRegistry();
   await withServer(registry, async (base) => {
