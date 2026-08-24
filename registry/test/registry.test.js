@@ -24,12 +24,27 @@ test("register rejects a duplicate id", () => {
   assert.throws(() => registry.register(createFixtureManifest("fixture-a").manifest), DuplicateAdapterError);
 });
 
-test("get/start/stop/health on an unknown id throw UnknownAdapterError", async () => {
+test("get/start/stop/health/resource on an unknown id throw UnknownAdapterError", async () => {
   const registry = new AdapterRegistry();
   assert.throws(() => registry.get("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.start("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.stop("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.health("missing"), UnknownAdapterError);
+  assert.throws(() => registry.resource("missing"), UnknownAdapterError);
+});
+
+test("resource() exposes the acquired handle only once start() has resolved, and clears it after stop()", async () => {
+  const registry = new AdapterRegistry();
+  const { manifest } = createFixtureManifest("fixture-a");
+  registry.register(manifest);
+
+  assert.equal(registry.resource("fixture-a"), undefined);
+
+  await registry.start("fixture-a");
+  assert.deepEqual(registry.resource("fixture-a"), { id: "fixture-a", pid: 1 });
+
+  await registry.stop("fixture-a");
+  assert.equal(registry.resource("fixture-a"), undefined);
 });
 
 test("two adapters coexist and shut down independently", async () => {

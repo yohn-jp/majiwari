@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Versioned adapter manifest schema and runtime registry. Owns adapter registration, lifecycle, and normalized health/status; stays ignorant of any single adapter's tool semantics.",
+  "main": "src/index.js",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/manifest.js && node --check src/registry.js"
+    "check": "node --check src/manifest.js && node --check src/registry.js && node --check src/index.js"
   },
   "dependencies": {
     "zod": "4.4.3"

@@ -40,7 +40,15 @@ A manifest fails validation deterministically (`AdapterManifestError`, one messa
 
 Adapter failures are isolated by construction: `start()`/`stop()` catch a rejecting transport hook and record it on that adapter's own entry as `errored` rather than throwing out of the call, so one broken adapter cannot block or crash the registration/lifecycle of any other registered adapter. Only a lookup against an unregistered `id` throws (`UnknownAdapterError`), since that is a caller bug, not an adapter failure.
 
-This lands the contract from #22 first; migrating the OCR adapter onto it, wiring a runtime that actually hosts it plus a second adapter, and building the operator UI are separate, later issues (see Non-goals below and #22).
+This lands the contract from #22 first; migrating the OCR adapter onto it and building the operator UI are separate, later issues (see Non-goals below and #22).
+
+## Multi-adapter gateway routing
+
+`gateway/src/registry-gateway.js` (`createRegistryGateway`) is the runtime that hosts more than one adapter through `registry/` on a single Streamable HTTP endpoint. `publish(manifest)` registers and starts an adapter; `unpublish(id)` stops routing new sessions to it, closes every session currently routed to it, and releases its one upstream resource -- all without touching any other adapter's sessions or resource.
+
+Routing is a single deterministic lookup of the registered adapter id carried on a session's initializing request (the `Mcp-Adapter-Id` header), never a branch on adapter type, transport kind, or capabilities. Each adapter keeps exactly one upstream client/process, acquired once through the registry's own `start()`/`stop()` (`gateway/src/stdio-target.js` is the "stdio" transport convention this consumes: a handle exposing a connected MCP client plus its negotiated version/capabilities); a downstream session only ever gets a fresh per-session `Server` bridged onto that adapter's client via [mcp-proxy](https://github.com/punkpeye/mcp-proxy)'s `proxyServer`, so tool discovery/invocation always reaches the selected adapter's own native names, schemas, and results, and one adapter's failure or removal cannot reach another's sessions.
+
+This is additive to, and does not replace, the single-target CLI (`gateway/bin/gateway.mjs`) that OCR's deployment still uses -- migrating OCR itself onto `registry/`'s manifest contract remains a separate, later change (see Non-goals below).
 
 ## Runtime
 
@@ -103,6 +111,6 @@ The following are documented here as the intended direction if a second adapter 
 - **`adapter-authoring` Skill** -- an LLM-facing workflow (capability discovery -> separate deterministic/LLM-judgment work -> tool surface design -> schema/fixture generation -> scaffold -> contract test -> PR) for building a new adapter.
 - **Migrating the OCR adapter onto `registry/`'s manifest/registry contract** -- `registry/` (manifest schema + `AdapterRegistry`) now exists and is documented above, but `adapters/open-code-review/` does not register through it yet; it still runs standalone via `src/server.js`, unchanged.
 - **Community contribution CI gates** -- manifest/schema validation, deterministic fixture replay, MCP conformance, and security lint enforced automatically on `adapters/` pull requests.
-- **A second adapter, and a runtime that actually hosts more than one adapter through the registry.** Generalizing the gateway/registry is considered validated only once a non-OCR adapter actually uses it.
+- **A real second adapter using the multi-adapter gateway in production.** The runtime that hosts more than one adapter through the registry now exists (see "Multi-adapter gateway routing" above), proven against fixture adapters; migrating OCR, or shipping a genuinely new adapter, onto it is still a separate, later change.
 
 This mirrors the original project boundary: broadening scope before a real second use case creates duplication is deferred until that duplication is real.

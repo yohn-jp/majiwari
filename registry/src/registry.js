@@ -81,6 +81,18 @@ export class AdapterRegistry {
   }
 
   /**
+   * The raw handle acquired by the adapter's own transport.start(), or
+   * undefined when nothing is currently acquired. Opaque to the registry --
+   * it never inspects the handle's shape -- but exposed so a consumer that
+   * knows what a given transport kind's handle contains (e.g. a gateway
+   * bridging "stdio" adapters) can reach it without acquiring a second,
+   * redundant resource of its own.
+   */
+  resource(id) {
+    return this.#requireEntry(id).handle;
+  }
+
+  /**
    * Start one adapter. A failure inside the adapter's own transport (a
    * rejected start(), a thrown error) is captured on that adapter's entry
    * as ERRORED and never propagates -- it cannot crash or block any other
