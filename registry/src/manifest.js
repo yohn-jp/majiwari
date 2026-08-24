@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { targetProviderContractSchema } from "./target-provider.js";
 
 export const MANIFEST_SCHEMA_VERSION = "1";
 
@@ -46,7 +47,11 @@ const manifestSchema = z
     transport: transportSchema,
     health: z.custom(isFunction, { message: "health must be a function" }).optional(),
     listTools: z.custom(isFunction, { message: "listTools must be a function" }).optional(),
-    capabilities: z.array(z.string().min(1)).optional()
+    capabilities: z.array(z.string().min(1)).optional(),
+    // Optional target-provider capability (#26): opaque-target list/get/
+    // resolve/invalidate hooks. Absent by default -- adapters that never
+    // set this field are validated and behave exactly as before.
+    targetProvider: targetProviderContractSchema.optional()
   })
   .strict();
 

@@ -40,6 +40,12 @@ A manifest fails validation deterministically (`AdapterManifestError`, one messa
 
 Adapter failures are isolated by construction: `start()`/`stop()` catch a rejecting transport hook and record it on that adapter's own entry as `errored` rather than throwing out of the call, so one broken adapter cannot block or crash the registration/lifecycle of any other registered adapter. Only a lookup against an unregistered `id` throws (`UnknownAdapterError`), since that is a caller bug, not an adapter failure.
 
+### Optional target-provider capability (#26)
+
+A manifest may declare an optional, separately versioned `targetProvider` (`registry/src/target-provider.js`, `TARGET_PROVIDER_SCHEMA_VERSION`): four hooks, `list`/`get`/`resolve`/`invalidate`, for adapters that operate against selectable, adapter-defined targets (e.g. a workspace or checkout) rather than a single fixed one. It is entirely opt-in -- an adapter that never sets `targetProvider` is validated and behaves exactly as before, and calling `AdapterRegistry#listTargets`/`getTarget`/`resolveTarget`/`invalidateTarget` against it throws `TargetCapabilityUnsupportedError`.
+
+The registry enforces two boundary properties generically, without knowing what any adapter's targets mean: every client-supplied target id is validated as an opaque identifier (`parseTargetId`) before it ever reaches a provider hook, so a path-shaped id can never bypass target resolution; and every value returned by `list()`/`get()` is validated against the public target schema, which structurally has no field for the adapter-internal descriptor `resolve()` returns -- only `resolve()` can produce one, and it never crosses back out through `list()`/`get()`. What a resolved descriptor actually contains (a filesystem path, a URL, anything else) is entirely adapter-defined.
+
 This lands the contract from #22 first; migrating the OCR adapter onto it, wiring a runtime that actually hosts it plus a second adapter, and building the operator UI are separate, later issues (see Non-goals below and #22).
 
 ## Runtime
