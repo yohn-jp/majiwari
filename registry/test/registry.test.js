@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AdapterManifestError } from "../src/manifest.js";
 import { AdapterRegistry, AdapterState, DuplicateAdapterError, UnknownAdapterError } from "../src/registry.js";
-import { createFailingFixtureManifest, createFixtureManifest } from "./fixtures/fixture-adapter.js";
+import { createFailingFixtureManifest, createFixtureManifest, createFlakyStopFixtureManifest } from "./fixtures/fixture-adapter.js";
 
 test("register validates the manifest and reports the registered state", () => {
   const registry = new AdapterRegistry();
@@ -61,7 +61,7 @@ test("a failing adapter start is isolated and does not affect a healthy sibling"
   const registry = new AdapterRegistry();
   const healthy = createFixtureManifest("fixture-healthy");
   registry.register(healthy.manifest);
-  registry.register(createFailingFixtureManifest("fixture-broken", "spawn failed"));
+  registry.register(createFailingFixtureManifest("fixture-broken", "spawn failed").manifest);
 
   const healthyResult = await registry.start("fixture-healthy");
   const brokenResult = await registry.start("fixture-broken");
@@ -76,7 +76,7 @@ test("a failing adapter start is isolated and does not affect a healthy sibling"
 test("list reports every registered adapter regardless of lifecycle state", async () => {
   const registry = new AdapterRegistry();
   registry.register(createFixtureManifest("fixture-a").manifest);
-  registry.register(createFailingFixtureManifest("fixture-broken"));
+  registry.register(createFailingFixtureManifest("fixture-broken").manifest);
   await registry.start("fixture-broken");
 
   const ids = registry.list().map((entry) => entry.id).sort();
@@ -116,6 +116,71 @@ test("tools() delegates discovery to the adapter and defaults to empty", async (
   registry.register(manifest);
   assert.deepEqual(await registry.tools("fixture-a"), [{ name: "fixture-a_tool" }]);
 
-  registry.register(createFailingFixtureManifest("fixture-broken"));
+  registry.register(createFailingFixtureManifest("fixture-broken").manifest);
   assert.deepEqual(await registry.tools("fixture-broken"), []);
+});
+
+test("a failed start followed by stop is a safe no-op and never invokes transport.stop()", async () => {
+  const registry = new AdapterRegistry();
+  const broken = createFailingFixtureManifest("fixture-broken", "spawn failed");
+  registry.register(broken.manifest);
+
+  const started = await registry.start("fixture-broken");
+  assert.equal(started.state, AdapterState.ERRORED);
+  assert.equal(broken.calls.started, 1);
+  assert.equal(broken.calls.stopped, 0);
+
+  const stopped = await registry.stop("fixture-broken");
+  // A failed start never acquired a resource, so stop() must not invoke the
+  // adapter's stop() on a handle that was never obtained.
+  assert.equal(broken.calls.stopped, 0);
+  assert.equal(stopped.state, AdapterState.STOPPED);
+  assert.equal(stopped.error, undefined);
+});
+
+test("a failed stop leaves the resource held and is safely retryable", async () => {
+  const registry = new AdapterRegistry();
+  const flaky = createFlakyStopFixtureManifest("fixture-flaky", 1);
+  registry.register(flaky.manifest);
+
+  await registry.start("fixture-flaky");
+  assert.equal(registry.get("fixture-flaky").state, AdapterState.RUNNING);
+
+  const firstStop = await registry.stop("fixture-flaky");
+  assert.equal(firstStop.state, AdapterState.ERRORED);
+  assert.equal(flaky.calls.stopped, 1);
+
+  // Retrying stop() must attempt release again -- the resource is still
+  // held after a failed cleanup, unlike a failed start.
+  const secondStop = await registry.stop("fixture-flaky");
+  assert.equal(secondStop.state, AdapterState.STOPPED);
+  assert.equal(flaky.calls.stopped, 2);
+  assert.equal(secondStop.error, undefined);
+
+  // Once actually released, a further stop() is a no-op that does not
+  // re-invoke transport.stop() -- no repeated/invalid cleanup calls.
+  await registry.stop("fixture-flaky");
+  assert.equal(flaky.calls.stopped, 2);
+});
+
+test("start() refuses to re-acquire while a failed stop still holds the resource", async () => {
+  const registry = new AdapterRegistry();
+  const flaky = createFlakyStopFixtureManifest("fixture-flaky", 1);
+  registry.register(flaky.manifest);
+
+  await registry.start("fixture-flaky");
+  await registry.stop("fixture-flaky"); // fails once by design, resource still held
+  assert.equal(registry.get("fixture-flaky").state, AdapterState.ERRORED);
+  assert.equal(flaky.calls.started, 1);
+
+  // start() must not acquire a second resource on top of the one still
+  // held by the failed stop -- that would leak the first handle.
+  const retriedStart = await registry.start("fixture-flaky");
+  assert.equal(flaky.calls.started, 1);
+  assert.equal(retriedStart.state, AdapterState.ERRORED);
+
+  // Releasing the held resource still works afterward.
+  const stopped = await registry.stop("fixture-flaky");
+  assert.equal(stopped.state, AdapterState.STOPPED);
+  assert.equal(flaky.calls.stopped, 2);
 });
