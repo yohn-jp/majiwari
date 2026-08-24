@@ -1,0 +1,17 @@
+{
+  "name": "@majiwari/registry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Versioned adapter manifest schema and runtime registry. Owns adapter registration, lifecycle, and normalized health/status; stays ignorant of any single adapter's tool semantics.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/manifest.js && node --check src/registry.js"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
