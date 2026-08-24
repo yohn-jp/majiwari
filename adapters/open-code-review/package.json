@@ -6,11 +6,13 @@
   "description": "Read-only MCP adapter that exposes OpenCodeReview delegation mode to ChatGPT.",
   "scripts": {
     "start": "node src/server.js",
+    "start:registry": "node src/runtime.js",
     "test": "node --test",
-    "check": "node --check src/core.js && node --check src/server.js && node --check src/doctor.js",
+    "check": "node --check src/core.js && node --check src/server.js && node --check src/doctor.js && node --check src/manifest.js && node --check src/runtime.js",
     "doctor": "node src/doctor.js"
   },
   "dependencies": {
+    "@majiwari/registry": "0.1.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "zod": "4.4.3"
   },

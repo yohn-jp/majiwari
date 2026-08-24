@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "start": "npm --workspace @majiwari/adapter-open-code-review start --",
+    "start:registry": "npm --workspace @majiwari/adapter-open-code-review run start:registry --",
     "gateway": "npm --workspace @majiwari/gateway start --",
     "test": "npm test --workspaces",
     "check": "npm run check --workspaces",
