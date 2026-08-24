@@ -31,7 +31,7 @@ This project does not implement code review. OCR remains authoritative for deter
 
 ## Requirements
 
-- Node.js 20+
+- Node.js >=22.13
 - Git 2.41+
 - Alibaba OpenCodeReview (`ocr`)
 - a Cloudflare account, for the Tunnel/Worker/Access Managed OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
