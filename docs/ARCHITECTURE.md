@@ -24,9 +24,23 @@ OpenCodeReview (OCR) delegation is the first adapter, not the platform's purpose
 | --- | --- | --- | --- |
 | Adapter (`adapters/<name>/`) | Turn an external tool into deterministic MCP tools | target CLI/API, arguments, JSON, domain schema | remote transport, Cloudflare |
 | Skill (`plugin/skills/`) | Tool call order, LLM judgment, coverage invariants | adapter tool surface, domain workflow | CLI implementation detail, transport |
+| Registry (`registry/`) | Validate adapter manifests; own adapter identity, lifecycle (register/start/stop), and normalized health/status | the manifest contract, lifecycle state transitions | any adapter's tool names/schemas/results, transport wiring, domain reasoning |
 | Runtime | Run an adapter as a stdio MCP server | MCP server contract | domain reasoning |
 | Gateway (`gateway/`) | Turn stdio MCP into remote MCP | MCP protocol/transport | OCR or any other adapter's domain semantics |
 | Deployment (`deployments/cloudflare/`) | Tunnel / Worker / Managed OAuth / secrets | network, auth, hosting | adapter tool semantics |
+
+## Adapter manifest and runtime registry
+
+`registry/` (`@majiwari/registry`) is the generic boundary that lets one resident runtime host more than one adapter. It is the core-vs-adapter ownership split this platform is built on:
+
+- **Core (`registry/src/manifest.js`, `registry/src/registry.js`) owns**: the versioned manifest schema (`schemaVersion`, `id`, `version`, `transport`, optional `capabilities`), identity uniqueness within one runtime, lifecycle transitions (`registered` -> `starting` -> `running` -> `stopping` -> `stopped`, or `errored`), and a normalized health/status shape that looks the same for every adapter no matter its transport.
+- **Adapter (each manifest) owns**: what its `id`/`version` mean, how its `transport` reaches it (`stdio` with a `start()`/`stop()` pair the registry calls opaquely, or a remote MCP `endpoint` URL with optional `connect()`/`disconnect()`), what its optional `health()` checks, what its optional `listTools()` discovers, and what its optional `capabilities` advertise. The registry never inspects a tool's name, schema, or result -- that surface stays owned by the adapter's own MCP server, per the transparency principle above.
+
+A manifest fails validation deterministically (`AdapterManifestError`, one message per offending field) on a wrong `schemaVersion`, a malformed `id`/`version`, an unknown top-level field, an unsupported `transport.kind`, or a declared hook (`start`, `stop`, `health`, `listTools`, `connect`, `disconnect`) that is not a function. `AdapterRegistry#register` additionally rejects a second manifest reusing an already-registered `id` (`DuplicateAdapterError`).
+
+Adapter failures are isolated by construction: `start()`/`stop()` catch a rejecting transport hook and record it on that adapter's own entry as `errored` rather than throwing out of the call, so one broken adapter cannot block or crash the registration/lifecycle of any other registered adapter. Only a lookup against an unregistered `id` throws (`UnknownAdapterError`), since that is a caller bug, not an adapter failure.
+
+This lands the contract from #22 first; migrating the OCR adapter onto it, wiring a runtime that actually hosts it plus a second adapter, and building the operator UI are separate, later issues (see Non-goals below and #22).
 
 ## Runtime
 
@@ -87,8 +101,8 @@ The following are documented here as the intended direction if a second adapter 
 
 - **`toolkit/`** -- scaffolding (`adapter init`), a schema helper, a subprocess-safe invocation primitive, a structured JSON parser, a bounded file/context primitive, fixture harness, MCP conformance tests, and a security lint, so a new adapter does not reinvent `adapters/open-code-review/src/core.js`'s patterns from scratch.
 - **`adapter-authoring` Skill** -- an LLM-facing workflow (capability discovery -> separate deterministic/LLM-judgment work -> tool surface design -> schema/fixture generation -> scaffold -> contract test -> PR) for building a new adapter.
-- **A concrete `Adapter` interface** -- `manifest()` / `tools()` / `invoke()` / `health()` -- once a second adapter's actual needs are known. Fixing this shape before a second adapter exists risks designing for a hypothetical.
+- **Migrating the OCR adapter onto `registry/`'s manifest/registry contract** -- `registry/` (manifest schema + `AdapterRegistry`) now exists and is documented above, but `adapters/open-code-review/` does not register through it yet; it still runs standalone via `src/server.js`, unchanged.
 - **Community contribution CI gates** -- manifest/schema validation, deterministic fixture replay, MCP conformance, and security lint enforced automatically on `adapters/` pull requests.
-- **A second adapter.** Generalizing the gateway is considered validated only once a non-OCR adapter actually uses it.
+- **A second adapter, and a runtime that actually hosts more than one adapter through the registry.** Generalizing the gateway/registry is considered validated only once a non-OCR adapter actually uses it.
 
 This mirrors the original project boundary: broadening scope before a real second use case creates duplication is deferred until that duplication is real.
