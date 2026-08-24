@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Versioned adapter manifest schema and runtime registry. Owns adapter registration, lifecycle, and normalized health/status; stays ignorant of any single adapter's tool semantics.",
+  "main": "./src/registry.js",
+  "exports": {
+    ".": "./src/registry.js",
+    "./manifest": "./src/manifest.js"
+  },
   "scripts": {
     "test": "node --test",
     "check": "node --check src/manifest.js && node --check src/registry.js"

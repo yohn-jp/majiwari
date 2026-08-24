@@ -8,11 +8,13 @@
     "adapters/open-code-review",
     "gateway",
     "registry",
+    "ui",
     "deployments/cloudflare/worker"
   ],
   "scripts": {
     "start": "npm --workspace @majiwari/adapter-open-code-review start --",
     "gateway": "npm --workspace @majiwari/gateway start --",
+    "ui": "npm --workspace @majiwari/ui start --",
     "test": "npm test --workspaces",
     "check": "npm run check --workspaces",
     "doctor": "npm --workspace @majiwari/adapter-open-code-review run doctor --"
