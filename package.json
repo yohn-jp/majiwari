@@ -25,6 +25,6 @@
     "inari:doctor": "npm --workspace @majiwari/adapter-inari run doctor --"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24"
   }
 }
