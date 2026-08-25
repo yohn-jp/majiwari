@@ -1,0 +1,27 @@
+{
+  "name": "@majiwari/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Resident local runtime composing trusted Majiwari adapters on one loopback ingress.",
+  "main": "src/index.js",
+  "bin": {
+    "majiwari-resident": "bin/resident.mjs"
+  },
+  "scripts": {
+    "start": "node bin/resident.mjs",
+    "test": "node --test",
+    "check": "node --check bin/resident.mjs && node --check src/config.js && node --check src/catalog.js && node --check src/runtime.js && node --check src/cli.js && node --check src/index.js"
+  },
+  "dependencies": {
+    "@majiwari/adapter-inari": "0.1.0",
+    "@majiwari/adapter-open-code-review": "0.1.0",
+    "@majiwari/gateway": "0.2.0",
+    "@majiwari/registry": "0.1.0",
+    "@majiwari/ui": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

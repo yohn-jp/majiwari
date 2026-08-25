@@ -10,6 +10,7 @@
     "gateway",
     "registry",
     "ui",
+    "runtime",
     "deployments/cloudflare/worker"
   ],
   "scripts": {
@@ -17,12 +18,16 @@
     "start:registry": "npm --workspace @majiwari/adapter-open-code-review run start:registry --",
     "gateway": "npm --workspace @majiwari/gateway start --",
     "ui": "npm --workspace @majiwari/ui start --",
+    "resident": "npm --workspace @majiwari/runtime start --",
     "test": "npm test --workspaces",
     "check": "npm run check --workspaces",
     "doctor": "npm --workspace @majiwari/adapter-open-code-review run doctor --",
     "inari": "npm --workspace @majiwari/adapter-inari start --",
     "inari:registry": "npm --workspace @majiwari/adapter-inari run start:registry --",
     "inari:doctor": "npm --workspace @majiwari/adapter-inari run doctor --"
+  },
+  "devDependencies": {
+    "js-yaml": "5.4.0"
   },
   "engines": {
     "node": ">=24"

@@ -25,10 +25,11 @@ export const ADAPTER_VERSION = "0.1.0";
  * be published through `createRegistryGateway` at `/mcp/inari` with no
  * Inari-specific code in `gateway/` or `registry/`.
  */
-export function createManifest({ repo } = {}) {
+export function createManifest({ repo, stderr = "inherit" } = {}) {
   const transport = createStdioGatewayTransport({
     command: process.execPath,
-    args: repo ? [SERVER_ENTRY, "--repo", repo] : [SERVER_ENTRY]
+    args: repo ? [SERVER_ENTRY, "--repo", repo] : [SERVER_ENTRY],
+    stderr
   });
   let resource;
 

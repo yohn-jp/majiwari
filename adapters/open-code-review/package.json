@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
   "description": "Read-only MCP adapter that exposes OpenCodeReview delegation mode to ChatGPT.",
   "scripts": {
     "start": "node src/server.js",
     "start:registry": "node src/runtime.js",
     "test": "node --test",
-    "check": "node --check src/core.js && node --check src/server.js && node --check src/doctor.js && node --check src/manifest.js && node --check src/runtime.js",
+    "check": "node --check src/core.js && node --check src/index.js && node --check src/server.js && node --check src/doctor.js && node --check src/manifest.js && node --check src/runtime.js",
     "doctor": "node src/doctor.js"
   },
   "dependencies": {
