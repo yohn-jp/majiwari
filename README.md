@@ -33,7 +33,7 @@ This project does not implement code review. OCR remains authoritative for deter
 
 ## Requirements
 
-- Node.js >=22.13
+- Node.js >=24
 - Git 2.41+
 - Alibaba OpenCodeReview (`ocr`), for the OCR adapter
 - Inari (`gh-inari`) and an authenticated `gh`, for the Inari adapter

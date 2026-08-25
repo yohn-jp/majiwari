@@ -7,7 +7,7 @@ The Worker is the only public entry point. `/mcp` sits behind Cloudflare Access 
 - [`TUNNEL.md`](TUNNEL.md) completed: a Named Tunnel running the gateway
 - the `/mcp` Managed OAuth Access Application and the Workers VPC Service both provisioned via [`../terraform/access.tf`](../terraform/access.tf) (`terraform apply` with `public_mcp_hostname` and `gateway_tunnel_id` set; see [`../terraform/README.md`](../terraform/README.md))
 - a Cloudflare account, `wrangler` authenticated (`npx wrangler login`)
-- Node.js >=22.13
+- Node.js >=24
 
 ## 1. Create a local deployment profile
 

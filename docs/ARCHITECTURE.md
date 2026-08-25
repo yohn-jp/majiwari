@@ -25,6 +25,7 @@ OpenCodeReview (OCR) delegation is the first adapter, not the platform's purpose
 | Adapter (`adapters/<name>/`) | Turn an external tool into deterministic MCP tools | target CLI/API, arguments, JSON, domain schema | remote transport, Cloudflare |
 | Skill (`plugin/skills/`) | Tool call order, LLM judgment, coverage invariants | adapter tool surface, domain workflow | CLI implementation detail, transport |
 | Registry (`registry/`) | Validate adapter manifests; own adapter identity, lifecycle (register/start/stop), and normalized health/status | the manifest contract, lifecycle state transitions | any adapter's tool names/schemas/results, transport wiring, domain reasoning |
+| UI shell (`ui/`) | Project the registry's list/detail/health/tools into an operator-facing web view | the registry projection surface | any adapter's domain semantics, MCP tool behavior |
 | Runtime | Run an adapter as a stdio MCP server | MCP server contract | domain reasoning |
 | Gateway (`gateway/`) | Turn stdio MCP into remote MCP | MCP protocol/transport | OCR or any other adapter's domain semantics |
 | Deployment (`deployments/cloudflare/`) | Tunnel / Worker / Managed OAuth / secrets | network, auth, hosting | adapter tool semantics |
@@ -40,7 +41,11 @@ A manifest fails validation deterministically (`AdapterManifestError`, one messa
 
 Adapter failures are isolated by construction: `start()`/`stop()` catch a rejecting transport hook and record it on that adapter's own entry as `errored` rather than throwing out of the call, so one broken adapter cannot block or crash the registration/lifecycle of any other registered adapter. Only a lookup against an unregistered `id` throws (`UnknownAdapterError`), since that is a caller bug, not an adapter failure.
 
-This lands the contract from #22 first; migrating the OCR adapter onto it and building the operator UI are separate, later issues (see Non-goals below and #22).
+This lands the contract from #22 first; migrating the OCR adapter onto it and wiring a runtime that actually hosts it plus a second adapter are separate, later issues (see Non-goals below and #22).
+
+## Operator web UI shell
+
+`ui/` (`@majiwari/ui`) is a generic, registry-driven operator UI: an HTTP server that projects one `AdapterRegistry`'s `list()`/`get()`/`tools()`/`health()`, and, when an adapter declares it, its optional `listTargets()` capability, into JSON (`GET /api/adapters`, `GET /api/adapters/:id`) and a static frontend that renders whatever that JSON contains. It owns no adapter identity of its own -- it takes a registry instance and reflects it, so registering another adapter changes what the shell shows without changing the shell's code. An unknown adapter id in the detail route maps to `404` from the registry's own `UnknownAdapterError`. Tool discovery, health, and the optional target-provider projection are each fetched and rendered independently: a failure in any one of them (an adapter's `listTools()`/`health()` rejecting, or an adapter that never declared `targetProvider`, which surfaces as the registry's own `TargetCapabilityUnsupportedError`) is captured as a bounded status for that section alone and never fails the rest of the detail response. One adapter's `errored`/`stopped` state, or a broken optional capability, never prevents another registered adapter from listing or being inspected. The shell is an optional, separate process (`ui/bin/ui.mjs`, `npm run ui`) with no wiring into `gateway/` or any adapter -- the MCP endpoint's operation does not depend on it being started.
 
 ## Multi-adapter gateway routing
 
@@ -62,7 +67,7 @@ The registry enforces these boundary properties generically, without knowing wha
 - Every value returned by `list()`/`get()` is validated against the public target schema, which structurally has no field for the adapter-internal `descriptor` `resolve()` returns -- only `resolve()` can produce one, and it never crosses back out through `list()`/`get()`. What a resolved descriptor actually contains (a filesystem path, a URL, anything else) is entirely adapter-defined and never reaches a remote client.
 - Public target metadata (`publicTargetSchema`'s `metadata` field) is restricted to JSON-safe values (strings, numbers, booleans, `null`, and arrays/plain objects of those) by schema, not by convention -- a provider cannot pass a function, `BigInt`, `Symbol`, or other non-serializable value through the public projection.
 
-This lands the contract from #26 (tracking #22) first; a Mottainai-specific target-discovery provider, workspace switching, and any UI are separate, later, adapter-specific work -- this repository's `registry/` stays generic and never encodes what a target means for any one adapter.
+This lands the contract from #26 (tracking #22) first; a Mottainai-specific target-discovery provider and Mottainai-specific workspace-switching UI are separate, later, adapter-specific work -- this repository's `registry/` stays generic and never encodes what a target means for any one adapter. The generic operator UI shell (`ui/`, above) projects whatever `listTargets()` returns for an adapter that declares the capability, without ever branching on what a target means for that adapter.
 
 ## Runtime
 
