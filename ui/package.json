@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node bin/ui.mjs",
     "test": "node --test",
-    "check": "node --check bin/ui.mjs && node --check src/server.js && node --check src/projection.js"
+    "check": "node --check bin/ui.mjs && node --check src/server.js && node --check src/projection.js && node --check public/app.js"
   },
   "dependencies": {
     "@majiwari/registry": "0.1.0"
