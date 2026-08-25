@@ -6,6 +6,7 @@
   "description": "Deterministic CLI/API-to-MCP adapters and a generic stdio-to-remote-MCP gateway. OpenCodeReview delegation is the first adapter.",
   "workspaces": [
     "adapters/open-code-review",
+    "adapters/inari",
     "gateway",
     "registry",
     "deployments/cloudflare/worker"
@@ -16,7 +17,10 @@
     "gateway": "npm --workspace @majiwari/gateway start --",
     "test": "npm test --workspaces",
     "check": "npm run check --workspaces",
-    "doctor": "npm --workspace @majiwari/adapter-open-code-review run doctor --"
+    "doctor": "npm --workspace @majiwari/adapter-open-code-review run doctor --",
+    "inari": "npm --workspace @majiwari/adapter-inari start --",
+    "inari:registry": "npm --workspace @majiwari/adapter-inari run start:registry --",
+    "inari:doctor": "npm --workspace @majiwari/adapter-inari run doctor --"
   },
   "engines": {
     "node": ">=22.13"
