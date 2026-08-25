@@ -245,7 +245,7 @@ test("one adapter's process crashing does not break a sibling adapter's sessions
   }
 });
 
-test("a failed publish() leaves the errored registry entry observable until its lifecycle owner clears it", async () => {
+test("a failed publish() cleans up its own entry so the same adapter id can be retried immediately", async () => {
   const { gateway, registry } = await startGateway();
   try {
     const broken = {
@@ -256,19 +256,34 @@ test("a failed publish() leaves the errored registry entry observable until its 
     };
     await assert.rejects(() => gateway.publish(broken));
 
-    // Publication failure must not erase lifecycle state that the UI/runtime
-    // needs to observe.
-    assert.equal(registry.get("fixture-retry").state, AdapterState.ERRORED);
-    assert.match(registry.get("fixture-retry").error, /ENOENT|no such file/i);
-
-    // The lifecycle owner may explicitly clear a stopped entry before a
-    // deliberate retry; gateway publication never performs that mutation.
-    await gateway.unpublish("fixture-retry");
-    registry.unregister("fixture-retry");
+    // The compatibility wrapper owns this registration/start attempt and
+    // restores the historical retry contract. A direct registry.start(), in
+    // contrast, still leaves its errored entry observable (covered by the
+    // shared-ingress UI integration test).
+    assert.throws(() => registry.get("fixture-retry"), UnknownAdapterError);
 
     const started = await gateway.publish(probeManifest("fixture-retry"));
     assert.equal(started.state, AdapterState.RUNNING);
     assert.equal(registry.get("fixture-retry").state, AdapterState.RUNNING);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a compatibility publish() attach failure also rolls back its registration for an immediate retry", async () => {
+  const { gateway, registry } = await startGateway();
+  try {
+    const nonRoutable = {
+      schemaVersion: "1",
+      id: "fixture-attach-retry",
+      version: "1.0.0",
+      transport: { kind: "stdio", start: async () => ({}) }
+    };
+    await assert.rejects(() => gateway.publish(nonRoutable), /gateway-routable transport contract/);
+    assert.throws(() => registry.get(nonRoutable.id), UnknownAdapterError);
+
+    const retried = await gateway.publish(probeManifest(nonRoutable.id));
+    assert.equal(retried.state, AdapterState.RUNNING);
   } finally {
     await gateway.close();
   }

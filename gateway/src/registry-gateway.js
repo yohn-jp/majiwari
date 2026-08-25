@@ -206,17 +206,46 @@ export async function createRegistryGateway({ registry, host = "127.0.0.1", port
   }
 
   /**
+   * Roll back only state acquired by the compatibility publish() wrapper.
+   * attach()/detach() never call this helper: a resident runtime's registry
+   * entry must remain observable after a direct lifecycle failure.
+   */
+  async function cleanupCompatibilityEntry(id) {
+    try {
+      await registry.stop(id);
+    } catch (error) {
+      console.error("[majiwari-gateway] failed to stop a compatibility-published adapter during rollback", error);
+      return false;
+    }
+    try {
+      registry.unregister(id);
+      return true;
+    } catch (error) {
+      console.error("[majiwari-gateway] failed to unregister a compatibility-published adapter during rollback", error);
+      return false;
+    }
+  }
+
+  /**
    * Compatibility wrapper for the historical standalone/test API. It owns
    * only the lifecycle of the manifest it registers, then delegates the
-   * publication step to attach(). Failed starts remain visible in registry.
+   * publication step to attach(). A failed compatibility publish rolls back
+   * its own registry entry so the historical same-id retry contract remains.
    */
   async function publish(manifest) {
     const registered = registry.register(manifest);
     const id = registered.id;
     compatibilityPublished.add(id);
 
-    const started = await registry.start(id);
+    let started;
+    try {
+      started = await registry.start(id);
+    } catch (error) {
+      if (await cleanupCompatibilityEntry(id)) compatibilityPublished.delete(id);
+      throw error;
+    }
     if (started.state !== AdapterState.RUNNING) {
+      if (await cleanupCompatibilityEntry(id)) compatibilityPublished.delete(id);
       throw new Error(`adapter "${id}" failed to start: ${started.error ?? "unknown error"}`);
     }
 
@@ -224,8 +253,8 @@ export async function createRegistryGateway({ registry, host = "127.0.0.1", port
       await attach(id);
     } catch (error) {
       // This compatibility path started the resource itself, so it also
-      // releases it. Keep the resulting stopped/errored entry observable.
-      await registry.stop(id);
+      // releases and unregisters it. attach()/detach() remain lifecycle-neutral.
+      if (await cleanupCompatibilityEntry(id)) compatibilityPublished.delete(id);
       throw error;
     }
     return registry.get(id);
