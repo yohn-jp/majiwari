@@ -143,7 +143,14 @@ function createRoutingServer({ bridges, host, port, registry }) {
       }
     );
     proxyRequest.on("error", (error) => {
-      console.error(`[majiwari-gateway] error proxying to adapter "${adapterId}"`, error);
+      // adapterId is logged JSON-encoded, not interpolated raw. It is
+      // parsed straight out of the public request path; registry.get()
+      // above happens to guarantee it matches a validated adapter id (so
+      // it is clean in practice), but that guarantee lives in a different
+      // module and isn't something this log line should have to trust
+      // staying true -- encode it explicitly so a raw request-path value
+      // can never forge extra log lines.
+      console.error(`[majiwari-gateway] error proxying to adapter ${JSON.stringify(adapterId)}`, error);
       if (res.headersSent) res.destroy();
       else res.writeHead(502).end();
     });
