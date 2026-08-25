@@ -1,4 +1,5 @@
 import { validateManifest } from "./manifest.js";
+import { parseTargetId, validatePublicTarget, validateResolvedTarget } from "./target-provider.js";
 
 export const AdapterState = Object.freeze({
   REGISTERED: "registered",
@@ -27,6 +28,13 @@ export class AdapterAcquiredError extends Error {
   constructor(id) {
     super(`adapter "${id}" still holds an acquired resource; stop() it before unregister()`);
     this.name = "AdapterAcquiredError";
+  }
+}
+
+export class TargetCapabilityUnsupportedError extends Error {
+  constructor(id) {
+    super(`adapter "${id}" does not implement the target-provider capability`);
+    this.name = "TargetCapabilityUnsupportedError";
   }
 }
 
@@ -224,9 +232,53 @@ export class AdapterRegistry {
     return entry.manifest.listTools();
   }
 
+  /**
+   * Target-provider delegation (#26). Entirely optional: an adapter that
+   * never declares `manifest.targetProvider` is untouched by any of this --
+   * every call below throws TargetCapabilityUnsupportedError for it, same
+   * as calling tools() on an adapter with no listTools() returns [].
+   *
+   * Every client-supplied target id is validated as an opaque identifier
+   * (parseTargetId) *before* it ever reaches the adapter's own provider
+   * hooks, so a path-shaped id (e.g. "../../etc/passwd") is rejected at
+   * this boundary and never bypasses target resolution. Every value coming
+   * back out of a provider hook is validated against the public/resolved
+   * schema, so a provider cannot accidentally leak a resolved (internal)
+   * descriptor out of list()/get().
+   */
+  async listTargets(id) {
+    const provider = this.#requireTargetProvider(id);
+    const targets = await provider.list();
+    return targets.map((target) => validatePublicTarget(target));
+  }
+
+  async getTarget(id, targetId) {
+    const provider = this.#requireTargetProvider(id);
+    const safeId = parseTargetId(targetId);
+    return validatePublicTarget(await provider.get(safeId));
+  }
+
+  async resolveTarget(id, targetId) {
+    const provider = this.#requireTargetProvider(id);
+    const safeId = parseTargetId(targetId);
+    return validateResolvedTarget(await provider.resolve(safeId));
+  }
+
+  async invalidateTarget(id, targetId) {
+    const provider = this.#requireTargetProvider(id);
+    const safeId = parseTargetId(targetId);
+    return provider.invalidate(safeId);
+  }
+
   #requireEntry(id) {
     const entry = this.#adapters.get(id);
     if (!entry) throw new UnknownAdapterError(id);
     return entry;
+  }
+
+  #requireTargetProvider(id) {
+    const entry = this.#requireEntry(id);
+    if (!entry.manifest.targetProvider) throw new TargetCapabilityUnsupportedError(id);
+    return entry.manifest.targetProvider;
   }
 }
