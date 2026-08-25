@@ -13,12 +13,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
  * without re-negotiating per session. The registry itself never looks
  * inside this handle.
  */
-export function createStdioGatewayTransport({ command, args = [], env, connectionTimeout }) {
+export function createStdioGatewayTransport({ command, args = [], env, connectionTimeout, stderr = "inherit" }) {
   return {
     kind: "stdio",
     start: async () => {
       const client = new Client({ name: "majiwari-gateway", version: "1.0.0" }, { capabilities: {} });
-      const transport = new StdioClientTransport({ command, args, env, stderr: "inherit" });
+      const transport = new StdioClientTransport({ command, args, env, stderr });
       try {
         await client.connect(transport, connectionTimeout ? { timeout: connectionTimeout } : undefined);
       } catch (error) {

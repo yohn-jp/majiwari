@@ -57,7 +57,6 @@ server.registerTool(
     inputSchema: {},
     outputSchema: {
       ok: z.boolean(),
-      repo_root: z.string(),
       git_version: z.string(),
       ocr_version: z.string(),
       delegate_preview_json_supported: z.boolean(),
@@ -68,7 +67,9 @@ server.registerTool(
     annotations: READ_ONLY
   },
   async () => {
-    const data = await checkAdapterHealth(repoRoot);
+    // An absolute repository path is local configuration, not an MCP/public
+    // projection. Keep it available to the local doctor only.
+    const { repo_root: _repoRoot, ...data } = await checkAdapterHealth(repoRoot);
     return result(data, data.ok ? "OCR delegation adapter is ready." : "OCR is present, but full support was not detected for delegate preview/rule, scan preview, and rules check.");
   }
 );

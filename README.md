@@ -11,6 +11,7 @@ adapters/open-code-review/   deterministic MCP tools wrapping the ocr CLI (stdio
 adapters/inari/               deterministic MCP tools wrapping the inari CLI (stdio)
 gateway/                     generic stdio MCP -> Streamable HTTP transport, no adapter-specific logic
 registry/                     versioned adapter manifest schema and runtime registry
+runtime/                      resident local runtime, trusted catalog, and loopback ingress
 deployments/cloudflare/      Named Tunnel + Worker (/mcp proxy, Access Managed OAuth) + their setup docs
 plugin/skills/                ChatGPT-facing Delegation Mode skill
 docs/                         architecture and ChatGPT connection docs
@@ -99,6 +100,53 @@ npm run inari -- --repo /absolute/path/to/target-repository
 Equivalent environment-variable form: `INARI_REPO=/absolute/path/to/target-repository npm run inari`. Check its own prerequisites with `npm run inari:doctor -- --repo /absolute/path/to/target-repository`.
 
 Inari also registers through `registry/`'s `AdapterRegistry` and satisfies `gateway/`'s gateway-routable transport contract (`adapters/inari/src/manifest.js`, using `@majiwari/gateway`'s own `createStdioGatewayTransport`, the same convention OCR's manifest uses) -- so it can be hosted standalone through the registry (`npm run inari:registry`) or published on a `createRegistryGateway` instance at `/mcp/inari`, the same way OCR is published at `/mcp/open-code-review`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the manifest/registry/gateway contract.
+
+### Resident local golden path
+
+The resident runtime is the composed local process for running both trusted adapters on one loopback ingress. It owns config, the desired adapter set, registry lifecycle, signals, and the shared HTTP listener; `gateway/` only attaches MCP bridges and `ui/` only projects the same registry. It never accepts arbitrary commands, modules, URLs, or environment maps.
+
+Create a local config outside the repository (repository paths are private operator configuration):
+
+```json
+{
+  "version": 1,
+  "port": 8787,
+  "adapters": {
+    "open-code-review": {
+      "enabled": true,
+      "repo": "/absolute/path/to/target-repository"
+    },
+    "inari": {
+      "enabled": true,
+      "repo": "/absolute/path/to/target-repository"
+    }
+  }
+}
+```
+
+Start it with:
+
+```bash
+npm run resident -- --config /absolute/path/to/majiwari.runtime.json
+```
+
+The listener is always `127.0.0.1`; the one shared port serves:
+
+- `http://127.0.0.1:8787/mcp/open-code-review`
+- `http://127.0.0.1:8787/mcp/inari`
+- `http://127.0.0.1:8787/ui`
+- `http://127.0.0.1:8787/ui/api/adapters` and `/ui/api/adapters/:id`
+
+For a local smoke:
+
+```bash
+curl -fsS http://127.0.0.1:8787/ui >/dev/null
+curl -fsS http://127.0.0.1:8787/ui/api/adapters
+```
+
+Then connect an MCP Inspector or SDK client independently to both `/mcp/...` endpoints, list and call an adapter-owned tool on each, and send `SIGINT` or `SIGTERM` to confirm the process exits. Runtime/UI/MCP status does not print configured absolute repository paths.
+
+The legacy standalone commands remain supported and are intentionally separate: `npm start` and `npm run inari` start one stdio adapter, `npm run gateway` wraps one arbitrary stdio MCP command, and `npm run ui` serves an empty standalone UI. Use `npm run resident` for the shared local composition.
 
 ## Connect to ChatGPT
 
