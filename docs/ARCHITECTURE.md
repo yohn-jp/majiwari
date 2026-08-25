@@ -40,7 +40,17 @@ A manifest fails validation deterministically (`AdapterManifestError`, one messa
 
 Adapter failures are isolated by construction: `start()`/`stop()` catch a rejecting transport hook and record it on that adapter's own entry as `errored` rather than throwing out of the call, so one broken adapter cannot block or crash the registration/lifecycle of any other registered adapter. Only a lookup against an unregistered `id` throws (`UnknownAdapterError`), since that is a caller bug, not an adapter failure.
 
-This lands the contract from #22 first; migrating the OCR adapter onto it, wiring a runtime that actually hosts it plus a second adapter, and building the operator UI are separate, later issues (see Non-goals below and #22).
+This lands the contract from #22 first; migrating the OCR adapter onto it and building the operator UI are separate, later issues (see Non-goals below and #22).
+
+## Multi-adapter gateway routing
+
+`gateway/src/registry-gateway.js` (`createRegistryGateway`) is the runtime that hosts more than one adapter through `registry/` behind one public gateway. Majiwari is the single ingress: Cloudflare/public infrastructure routes everything to this one gateway process (see Runtime below), never directly to an individual adapter. `publish(manifest)` registers and starts an adapter; `unpublish(id)` stops routing new requests to it, closes every session currently routed to it, and releases its one upstream resource -- all without touching any other adapter's sessions or resource.
+
+Each adapter is exposed at its own path-based MCP endpoint, `/mcp/:adapterId` -- a single deterministic lookup of the registered adapter id parsed from the request path, resolved through the registry, never a branch on adapter type, transport kind, or capabilities. Each adapter keeps exactly one upstream `mcpClient`/process, acquired once through the registry's own `start()`/`stop()`. How the gateway reaches that resource internally -- one loopback-only `mcp-proxy` HTTP bridge per adapter, with a thin path-routing reverse proxy on the single public port dispatching to it -- is an internal implementation detail; a downstream session only ever gets a fresh per-session `Server` bridged onto that adapter's own `mcpClient` via [mcp-proxy](https://github.com/punkpeye/mcp-proxy)'s `proxyServer`, so tool discovery/invocation always reaches the selected adapter's own native names, schemas, and results, and one adapter's failure, crash, or removal cannot reach another's sessions.
+
+A resource returned by an adapter's `transport.start()`/`connect()` is gateway-routable only if it satisfies the explicit contract `gateway/src/gateway-transport.js` defines and validates: a connected `mcpClient` (an `@modelcontextprotocol/client` `Client`) plus the `serverVersion`/`serverCapabilities` it negotiated. This is a generic gateway concern, not something `registry/` inspects or validates -- the registry stays opaque to handle shape (see above) -- and any transport kind, present or future (`gateway/src/stdio-target.js`'s "stdio" convention, or a later "endpoint" transport for a remote MCP server), satisfies it the same way, so a future OCR or Inari adapter migrating onto `registry/` can implement it without any OCR/Inari-specific code living in `gateway/` or `registry/`. A startup failure that partially acquired a resource (a spawned process, a partially negotiated connection) releases what it acquired before rejecting, and a failed `publish()` always leaves the adapter id's registry entry cleared (`AdapterRegistry#unregister`) so the same id can be retried safely.
+
+This is additive to, and does not replace, the single-target CLI (`gateway/bin/gateway.mjs`) that OCR's deployment still uses -- migrating OCR itself onto `registry/`'s manifest contract remains a separate, later change (see Non-goals below).
 
 ## Runtime
 
@@ -103,6 +113,6 @@ The following are documented here as the intended direction if a second adapter 
 - **`adapter-authoring` Skill** -- an LLM-facing workflow (capability discovery -> separate deterministic/LLM-judgment work -> tool surface design -> schema/fixture generation -> scaffold -> contract test -> PR) for building a new adapter.
 - **Migrating the OCR adapter onto `registry/`'s manifest/registry contract** -- `registry/` (manifest schema + `AdapterRegistry`) now exists and is documented above, but `adapters/open-code-review/` does not register through it yet; it still runs standalone via `src/server.js`, unchanged.
 - **Community contribution CI gates** -- manifest/schema validation, deterministic fixture replay, MCP conformance, and security lint enforced automatically on `adapters/` pull requests.
-- **A second adapter, and a runtime that actually hosts more than one adapter through the registry.** Generalizing the gateway/registry is considered validated only once a non-OCR adapter actually uses it.
+- **A real second adapter using the multi-adapter gateway in production.** The runtime that hosts more than one adapter through the registry now exists (see "Multi-adapter gateway routing" above), proven against fixture adapters; migrating OCR, or shipping a genuinely new adapter, onto it is still a separate, later change.
 
 This mirrors the original project boundary: broadening scope before a real second use case creates duplication is deferred until that duplication is real.

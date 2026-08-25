@@ -2,7 +2,14 @@ import { z } from "zod";
 
 export const MANIFEST_SCHEMA_VERSION = "1";
 
-const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
+/**
+ * Exported so a consumer that has to recognize an adapter id outside a full
+ * manifest -- the gateway's public `/mcp/:adapterId` path routing
+ * (`gateway/src/registry-gateway.js`) -- shares this exact syntax rather
+ * than approximating it, so nothing but a truly registrable id ever reaches
+ * `registry.get()`/`registry.resource()`.
+ */
+export const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export class AdapterManifestError extends Error {
