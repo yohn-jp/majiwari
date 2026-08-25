@@ -1,5 +1,5 @@
 import { Server } from "@modelcontextprotocol/server";
-import { AdapterState, UnknownAdapterError } from "@majiwari/registry";
+import { AdapterState, ID_PATTERN, UnknownAdapterError } from "@majiwari/registry";
 import { proxyServer, startHTTPServer } from "mcp-proxy";
 import http from "node:http";
 import net from "node:net";
@@ -12,8 +12,19 @@ import { toGatewayRoutableResource } from "./gateway-transport.js";
  * gateway, never to an adapter directly, and this is the one deterministic
  * lookup that decides which registered adapter a request reaches. Never a
  * branch on adapter type, transport kind, or capabilities.
+ *
+ * Built from the manifest contract's own `ID_PATTERN` (`registry/src/
+ * manifest.js`) rather than a generic `[^/]+` capture, so the id segment is
+ * matched against the exact syntax a registrable adapter id can ever have:
+ * lowercase-alphanumeric-and-hyphen only. That makes URL-decoding the
+ * segment unnecessary -- no valid id ever needs percent-encoding -- so this
+ * router never calls `decodeURIComponent()` on request-controlled input.
+ * Malformed percent-encoding, a path-shaped id (`../etc`), or anything
+ * outside the manifest's own charset all simply fail to match and are
+ * rejected deterministically (404) rather than reaching `decodeURIComponent`
+ * and throwing a `URIError` out of the request handler.
  */
-const ADAPTER_PATH = /^\/mcp\/([^/]+)$/;
+const ADAPTER_PATH = new RegExp(`^/mcp/(${ID_PATTERN.source.slice(1, -1)})$`);
 
 /**
  * Loopback-only host each adapter's own internal MCP bridge binds to.
@@ -31,7 +42,7 @@ const INTERNAL_BRIDGE_HOST = "127.0.0.1";
 
 function matchAdapterPath(pathname) {
   const match = ADAPTER_PATH.exec(pathname);
-  return match ? decodeURIComponent(match[1]) : undefined;
+  return match ? match[1] : undefined;
 }
 
 /**

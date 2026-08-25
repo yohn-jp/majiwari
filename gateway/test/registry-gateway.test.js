@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -51,6 +52,25 @@ async function connectClient(port, adapterId) {
 
 function probeResult(result) {
   return JSON.parse(result.content[0].text);
+}
+
+/**
+ * A raw GET straight to the routing server's own path, bypassing the MCP
+ * client/transport entirely -- `http.request()`'s `path` option is sent
+ * verbatim on the wire without validating or re-encoding it, so this is the
+ * one way to actually put a malformed percent-encoded, path-shaped, or
+ * otherwise out-of-charset id on the request line, the way a raw client
+ * (not necessarily this repo's own SDK-based client) could.
+ */
+function rawGet(port, rawPath) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", method: "GET", path: rawPath, port }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 20 } = {}) {
@@ -126,6 +146,39 @@ test("an unknown or unpublished adapter path is rejected before any session is c
   try {
     await gateway.publish(probeManifest("fixture-a"));
     await assert.rejects(() => connectClient(port, "does-not-exist"));
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a malformed percent-encoded or path-shaped adapter path is rejected as a client error and never crashes the gateway", async () => {
+  const { gateway, port } = await startGateway();
+  try {
+    await gateway.publish(probeManifest("fixture-a"));
+
+    const badPaths = [
+      "/mcp/%zz", // invalid percent-encoding: not hex digits
+      "/mcp/%", // truncated percent-encoding
+      "/mcp/%e0%80", // percent-decodes to an incomplete UTF-8 sequence
+      "/mcp/..%2f..%2fetc%2fpasswd", // path traversal, encoded
+      "/mcp/foo%2fbar", // an encoded extra path separator
+      "/mcp/Foo_Bar", // outside the manifest's own id charset
+      "/mcp/a" // below the manifest's own minimum id length
+    ];
+    for (const badPath of badPaths) {
+      const status = await rawGet(port, badPath);
+      assert.ok(status >= 400 && status < 500, `expected a client error for ${badPath}, got ${status}`);
+    }
+
+    // None of the above may have destabilized the gateway -- the
+    // already-published adapter must still route normally afterward.
+    const client = await connectClient(port, "fixture-a");
+    try {
+      const tools = await client.listTools();
+      assert.deepEqual(tools.tools.map((tool) => tool.name), ["fixture-a_probe"]);
+    } finally {
+      await client.close();
+    }
   } finally {
     await gateway.close();
   }
