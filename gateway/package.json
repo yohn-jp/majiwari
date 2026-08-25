@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node bin/gateway.mjs",
     "test": "node --test test/*.test.js",
-    "check": "node --check bin/gateway.mjs && node --check src/index.js && node --check src/registry-gateway.js && node --check src/stdio-target.js"
+    "check": "node --check bin/gateway.mjs && node --check src/index.js && node --check src/gateway-transport.js && node --check src/registry-gateway.js && node --check src/stdio-target.js"
   },
   "dependencies": {
     "@majiwari/registry": "^0.1.0",

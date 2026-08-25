@@ -23,6 +23,13 @@ export class UnknownAdapterError extends Error {
   }
 }
 
+export class AdapterAcquiredError extends Error {
+  constructor(id) {
+    super(`adapter "${id}" still holds an acquired resource; stop() it before unregister()`);
+    this.name = "AdapterAcquiredError";
+  }
+}
+
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -90,6 +97,23 @@ export class AdapterRegistry {
    */
   resource(id) {
     return this.#requireEntry(id).handle;
+  }
+
+  /**
+   * Remove a registered adapter's entry entirely, freeing its id for a
+   * fresh register(). Only valid while nothing is acquired -- a never-
+   * started registration, a cleanly stopped adapter, or a start() that
+   * failed without acquiring anything (see start() below) -- so a caller
+   * can safely clear a dead entry and retry the same id without ever
+   * dropping a resource on the floor. Throws AdapterAcquiredError if a
+   * resource is still held: releasing it is stop()'s job, not this one's.
+   */
+  unregister(id) {
+    const entry = this.#requireEntry(id);
+    if (entry.acquired) {
+      throw new AdapterAcquiredError(id);
+    }
+    this.#adapters.delete(id);
   }
 
   /**

@@ -1,13 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { AdapterRegistry, AdapterState } from "@majiwari/registry";
-import { ADAPTER_ID_HEADER, createRegistryGateway } from "../src/registry-gateway.js";
+import { AdapterRegistry, AdapterState, UnknownAdapterError } from "@majiwari/registry";
+import { createRegistryGateway } from "../src/registry-gateway.js";
 import { createStdioGatewayTransport } from "../src/stdio-target.js";
 
 const PROBE_SERVER = fileURLToPath(new URL("./fixtures/probe-server.mjs", import.meta.url));
+const HANGING_SERVER = fileURLToPath(new URL("./fixtures/hanging-server.mjs", import.meta.url));
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -20,12 +25,13 @@ function getFreePort() {
   });
 }
 
-function probeManifest(id) {
+function probeManifest(id, overrides = {}) {
   return {
     schemaVersion: "1",
     id,
     version: "1.0.0",
-    transport: createStdioGatewayTransport({ command: process.execPath, args: [PROBE_SERVER, id] })
+    transport: createStdioGatewayTransport({ command: process.execPath, args: [PROBE_SERVER, id] }),
+    ...overrides
   };
 }
 
@@ -38,9 +44,7 @@ async function startGateway() {
 
 async function connectClient(port, adapterId) {
   const client = new Client({ name: `test-${adapterId}`, version: "1.0.0" }, { capabilities: {} });
-  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-    requestInit: { headers: { [ADAPTER_ID_HEADER]: adapterId } }
-  });
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/${adapterId}`));
   await client.connect(transport);
   return client;
 }
@@ -49,19 +53,38 @@ function probeResult(result) {
   return JSON.parse(result.content[0].text);
 }
 
+async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 20 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await predicate();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error("waitFor: timed out");
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 test("publish() starts the adapter's own resource and marks it running", async () => {
   const { gateway, registry } = await startGateway();
   try {
     const started = await gateway.publish(probeManifest("fixture-a"));
     assert.equal(started.state, AdapterState.RUNNING);
     assert.equal(registry.get("fixture-a").state, AdapterState.RUNNING);
-    assert.ok(registry.resource("fixture-a").client);
+    assert.ok(registry.resource("fixture-a").mcpClient);
   } finally {
     await gateway.close();
   }
 });
 
-test("gateway publishes two fixture adapters concurrently and routes each client deterministically by adapter id", async () => {
+test("gateway publishes two fixture adapters concurrently at /mcp/:adapterId and routes each client deterministically by path", async () => {
   const { gateway, port } = await startGateway();
   let clientA;
   let clientB;
@@ -87,8 +110,9 @@ test("gateway publishes two fixture adapters concurrently and routes each client
     assert.equal(resultB.adapterId, "fixture-b");
     assert.notEqual(resultA.pid, resultB.pid);
 
-    // A client bound to fixture-a can never reach fixture-b's tool, even by
-    // name -- the session was bridged onto fixture-a's client only.
+    // A client bound to /mcp/fixture-a can never reach fixture-b's tool,
+    // even by name -- the session was bridged onto fixture-a's own internal
+    // bridge and upstream client only.
     await assert.rejects(() => clientA.callTool({ name: "fixture-b_probe" }));
   } finally {
     await clientA?.close();
@@ -97,7 +121,7 @@ test("gateway publishes two fixture adapters concurrently and routes each client
   }
 });
 
-test("an unknown or unpublished adapter id is rejected before any session is created", async () => {
+test("an unknown or unpublished adapter path is rejected before any session is created", async () => {
   const { gateway, port } = await startGateway();
   try {
     await gateway.publish(probeManifest("fixture-a"));
@@ -121,8 +145,10 @@ test("unpublish() cleans up only the removed adapter's own sessions and process,
     await gateway.unpublish("fixture-a");
 
     assert.equal(registry.get("fixture-a").state, AdapterState.STOPPED);
-    // fixture-a's session is gone: any further call on it fails.
+    // fixture-a's session is gone: any further call on it fails, and its
+    // path is rejected before a new session could ever be created.
     await assert.rejects(() => clientA.listTools());
+    await assert.rejects(() => connectClient(port, "fixture-a"));
 
     // fixture-b was never asked to stop and keeps serving its own session.
     assert.equal(registry.get("fixture-b").state, AdapterState.RUNNING);
@@ -133,5 +159,82 @@ test("unpublish() cleans up only the removed adapter's own sessions and process,
   } finally {
     await clientB?.close();
     await gateway.close();
+  }
+});
+
+test("one adapter's process crashing does not break a sibling adapter's sessions", async () => {
+  const { gateway, port, registry } = await startGateway();
+  let clientA;
+  let clientB;
+  try {
+    await gateway.publish(probeManifest("fixture-a"));
+    await gateway.publish(probeManifest("fixture-b"));
+
+    clientA = await connectClient(port, "fixture-a");
+    clientB = await connectClient(port, "fixture-b");
+
+    const resultA = probeResult(await clientA.callTool({ name: "fixture-a_probe" }));
+    process.kill(resultA.pid, "SIGKILL");
+
+    // fixture-a's own session eventually fails once its upstream process is
+    // gone -- this is the crash observed, not the assertion under test.
+    await assert.rejects(() => clientA.callTool({ name: "fixture-a_probe" }));
+
+    // fixture-b, an entirely unrelated adapter sharing only the public
+    // routing server, is untouched by fixture-a's crash.
+    assert.equal(registry.get("fixture-b").state, AdapterState.RUNNING);
+    const resultB = probeResult(await clientB.callTool({ name: "fixture-b_probe" }));
+    assert.equal(resultB.adapterId, "fixture-b");
+  } finally {
+    await clientA?.close().catch(() => {});
+    await clientB?.close();
+    await gateway.close();
+  }
+});
+
+test("a failed publish() leaves the adapter id retryable, and a later publish() with the same id succeeds", async () => {
+  const { gateway, registry } = await startGateway();
+  try {
+    const broken = {
+      schemaVersion: "1",
+      id: "fixture-retry",
+      version: "1.0.0",
+      transport: createStdioGatewayTransport({ command: "/no/such/majiwari-fixture-command", connectionTimeout: 500 })
+    };
+    await assert.rejects(() => gateway.publish(broken));
+
+    // The failed publish() must not leave registry state blocking a retry.
+    assert.throws(() => registry.get("fixture-retry"), UnknownAdapterError);
+
+    const started = await gateway.publish(probeManifest("fixture-retry"));
+    assert.equal(started.state, AdapterState.RUNNING);
+    assert.equal(registry.get("fixture-retry").state, AdapterState.RUNNING);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a startup failure that partially acquired a resource (a spawned process) releases it instead of leaking it", async () => {
+  const { gateway } = await startGateway();
+  const pidFile = path.join(os.tmpdir(), `majiwari-gateway-test-${randomUUID()}.pid`);
+  try {
+    const manifest = {
+      schemaVersion: "1",
+      id: "fixture-hang",
+      version: "1.0.0",
+      transport: createStdioGatewayTransport({ command: process.execPath, args: [HANGING_SERVER, pidFile], connectionTimeout: 300 })
+    };
+
+    await assert.rejects(() => gateway.publish(manifest));
+
+    const pid = Number(await waitFor(() => (fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8").trim() : undefined)));
+    assert.ok(Number.isInteger(pid) && pid > 0);
+
+    // The connect() timeout must have released the process it partially
+    // acquired -- it must not still be running once publish() has rejected.
+    await waitFor(() => !isProcessAlive(pid));
+  } finally {
+    await gateway.close();
+    fs.rmSync(pidFile, { force: true });
   }
 });
