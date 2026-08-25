@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { AdapterRegistry } from "@majiwari/registry";
-import { createUiServer } from "../src/server.js";
+import { createUiHandler, createUiServer } from "../src/server.js";
 import {
   createFailingFixtureManifest,
   createFixtureManifest,
@@ -255,4 +256,34 @@ test("an unmatched route returns 404", async () => {
     const response = await fetch(`${base}/does-not-exist`);
     assert.equal(response.status, 404);
   });
+});
+
+test("the UI handler mounts under /ui on an external ingress and fails closed for malformed ids", async () => {
+  const registry = new AdapterRegistry();
+  registry.register(createFixtureManifest("fixture-mounted"));
+  const handler = createUiHandler(registry, { basePath: "/ui" });
+  const ingress = http.createServer(async (req, res) => {
+    if (!(await handler(req, res))) sendFallbackNotFound(res);
+  });
+
+  function sendFallbackNotFound(res) {
+    res.writeHead(404).end();
+  }
+
+  const base = await listen(ingress);
+  try {
+    const index = await fetch(`${base}/ui`);
+    assert.equal(index.status, 200);
+    assert.match(await index.text(), /\/ui\/app\.js/);
+
+    const list = await fetch(`${base}/ui/api/adapters`);
+    assert.equal(list.status, 200);
+    assert.deepEqual((await list.json()).map((adapter) => adapter.id), ["fixture-mounted"]);
+
+    const malformed = await fetch(`${base}/ui/api/adapters/%zz`);
+    assert.equal(malformed.status, 404);
+    assert.equal((await fetch(`${base}/mcp/fixture-mounted`)).status, 404);
+  } finally {
+    await new Promise((resolve) => ingress.close(resolve));
+  }
 });

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { AdapterRegistry, AdapterState, UnknownAdapterError } from "@majiwari/registry";
-import { createRegistryGateway } from "../src/registry-gateway.js";
+import { GatewayAttachError, createRegistryGateway } from "../src/registry-gateway.js";
 import { createStdioGatewayTransport } from "../src/stdio-target.js";
 
 const PROBE_SERVER = fileURLToPath(new URL("./fixtures/probe-server.mjs", import.meta.url));
@@ -245,7 +245,7 @@ test("one adapter's process crashing does not break a sibling adapter's sessions
   }
 });
 
-test("a failed publish() leaves the adapter id retryable, and a later publish() with the same id succeeds", async () => {
+test("a failed publish() leaves the errored registry entry observable until its lifecycle owner clears it", async () => {
   const { gateway, registry } = await startGateway();
   try {
     const broken = {
@@ -256,14 +256,104 @@ test("a failed publish() leaves the adapter id retryable, and a later publish() 
     };
     await assert.rejects(() => gateway.publish(broken));
 
-    // The failed publish() must not leave registry state blocking a retry.
-    assert.throws(() => registry.get("fixture-retry"), UnknownAdapterError);
+    // Publication failure must not erase lifecycle state that the UI/runtime
+    // needs to observe.
+    assert.equal(registry.get("fixture-retry").state, AdapterState.ERRORED);
+    assert.match(registry.get("fixture-retry").error, /ENOENT|no such file/i);
+
+    // The lifecycle owner may explicitly clear a stopped entry before a
+    // deliberate retry; gateway publication never performs that mutation.
+    await gateway.unpublish("fixture-retry");
+    registry.unregister("fixture-retry");
 
     const started = await gateway.publish(probeManifest("fixture-retry"));
     assert.equal(started.state, AdapterState.RUNNING);
     assert.equal(registry.get("fixture-retry").state, AdapterState.RUNNING);
   } finally {
     await gateway.close();
+  }
+});
+
+test("attach requires a running gateway-routable registry entry and never starts or stops it", async () => {
+  const { gateway, registry } = await startGateway();
+  try {
+    registry.register(probeManifest("fixture-attach"));
+    await assert.rejects(
+      () => gateway.attach("fixture-attach"),
+      (error) => error instanceof GatewayAttachError && /not running/.test(error.message)
+    );
+    assert.equal(registry.get("fixture-attach").state, AdapterState.REGISTERED);
+
+    await registry.start("fixture-attach");
+    const resource = registry.resource("fixture-attach");
+    await gateway.attach("fixture-attach");
+    assert.equal(registry.get("fixture-attach").state, AdapterState.RUNNING);
+    assert.equal(registry.resource("fixture-attach"), resource);
+
+    await gateway.detach("fixture-attach");
+    assert.equal(registry.get("fixture-attach").state, AdapterState.RUNNING);
+    assert.equal(registry.resource("fixture-attach"), resource);
+    await registry.stop("fixture-attach");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("attach rejects unknown, failed, and non-routable entries without creating a bridge", async () => {
+  const { gateway, registry } = await startGateway();
+  try {
+    await assert.rejects(() => gateway.attach("does-not-exist"), UnknownAdapterError);
+
+    const failed = {
+      schemaVersion: "1",
+      id: "fixture-attach-failed",
+      version: "1.0.0",
+      transport: {
+        kind: "stdio",
+        start: async () => {
+          throw new Error("fixture start failed");
+        }
+      }
+    };
+    registry.register(failed);
+    await registry.start(failed.id);
+    await assert.rejects(
+      () => gateway.attach(failed.id),
+      (error) => error instanceof GatewayAttachError && /state: errored/.test(error.message)
+    );
+    assert.equal(registry.get(failed.id).state, AdapterState.ERRORED);
+
+    const nonRoutable = {
+      schemaVersion: "1",
+      id: "fixture-attach-resource",
+      version: "1.0.0",
+      transport: { kind: "stdio", start: async () => ({}) }
+    };
+    registry.register(nonRoutable);
+    await registry.start(nonRoutable.id);
+    await assert.rejects(
+      () => gateway.attach(nonRoutable.id),
+      (error) => error instanceof GatewayAttachError && /gateway-routable transport contract/.test(error.message)
+    );
+    assert.equal(registry.get(nonRoutable.id).state, AdapterState.RUNNING);
+    await registry.stop(nonRoutable.id);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("an externally mounted gateway never closes the ingress listener during disposal", async () => {
+  const registry = new AdapterRegistry();
+  const ingress = http.createServer();
+  await new Promise((resolve) => ingress.listen(0, "127.0.0.1", resolve));
+  const gateway = await createRegistryGateway({ registry, server: ingress });
+  try {
+    assert.equal(ingress.listening, true);
+    await gateway.close();
+    assert.equal(ingress.listening, true);
+  } finally {
+    await gateway.close();
+    await new Promise((resolve) => ingress.close(resolve));
   }
 });
 

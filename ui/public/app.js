@@ -107,6 +107,19 @@ export function renderDetail(adapter) {
   `;
 }
 
+function uiBasePath() {
+  if (typeof window === "undefined") return "";
+  const pathname = window.location.pathname;
+  if (pathname === "/" || pathname === "/index.html") return "";
+  if (pathname.endsWith("/index.html")) return pathname.slice(0, -"/index.html".length);
+  if (pathname.endsWith("/")) return pathname.slice(0, -1);
+  return pathname;
+}
+
+function apiPath(pathname) {
+  return `${uiBasePath()}${pathname}`;
+}
+
 function init() {
   const listEl = document.getElementById("adapter-list");
   const detailEl = document.getElementById("adapter-detail");
@@ -121,7 +134,7 @@ function init() {
   async function selectAdapter(id) {
     detailEl.innerHTML = '<p class="empty">Loading&hellip;</p>';
     try {
-      const response = await fetch(`/api/adapters/${encodeURIComponent(id)}`);
+      const response = await fetch(apiPath(`/api/adapters/${encodeURIComponent(id)}`));
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         detailEl.innerHTML = `<p class="error">${escapeHtml(body.error ?? `request failed (${response.status})`)}</p>`;
@@ -135,7 +148,7 @@ function init() {
 
   async function loadAdapters() {
     try {
-      const response = await fetch("/api/adapters");
+      const response = await fetch(apiPath("/api/adapters"));
       if (!response.ok) throw new Error(`request failed (${response.status})`);
       paintList(await response.json());
     } catch (error) {
