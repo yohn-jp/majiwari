@@ -52,10 +52,10 @@ export function createManifest({ repo, stderr = "inherit" } = {}) {
     // Re-derives repo/git/OCR support deterministically on every call rather
     // than asking the running child (cheap `git rev-parse`/`ocr --version`
     // checks, not an OCR CLI review call) -- and strips `repo_root` (an
-    // absolute host filesystem path) before returning, since this detail
-    // feeds the generic registry health/status contract, which is public
-    // surface: it must never leak a local filesystem path, unlike the
-    // `adapter_health` MCP tool's own documented output, which keeps it.
+    // absolute host filesystem path) before returning, since this detail feeds
+    // the generic registry health/status contract, which is public surface.
+    // The `adapter_health` MCP tool strips the same field; only the local
+    // doctor report keeps it.
     health: async () => {
       const repoRoot = await resolveRepoRoot(repo);
       const { repo_root: _repoRoot, ...publicHealth } = await checkAdapterHealth(repoRoot);

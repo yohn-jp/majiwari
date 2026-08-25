@@ -1,7 +1,7 @@
 import http from "node:http";
 import { AdapterRegistry, AdapterState } from "@majiwari/registry";
 import { createRegistryGateway } from "@majiwari/gateway";
-import { createUiHandler } from "@majiwari/ui/src/server.js";
+import { createUiHandler } from "@majiwari/ui";
 import { createConfiguredManifests, redactResidentError, TRUSTED_RESIDENT_CATALOG } from "./catalog.js";
 import { parseResidentConfig } from "./config.js";
 

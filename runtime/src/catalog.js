@@ -1,6 +1,6 @@
 import path from "node:path";
-import { createManifest as createOpenCodeReviewManifest } from "@majiwari/adapter-open-code-review/src/manifest.js";
-import { createManifest as createInariManifest } from "@majiwari/adapter-inari/src/manifest.js";
+import { createManifest as createOpenCodeReviewManifest } from "@majiwari/adapter-open-code-review";
+import { createManifest as createInariManifest } from "@majiwari/adapter-inari";
 import { enabledResidentAdapters, parseResidentConfig } from "./config.js";
 
 export const TRUSTED_RESIDENT_ADAPTER_IDS = Object.freeze(["open-code-review", "inari"]);

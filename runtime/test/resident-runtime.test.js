@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { AdapterState } from "@majiwari/registry";
 import { createRegistryGateway, createStdioGatewayTransport } from "@majiwari/gateway";
-import { createUiHandler } from "@majiwari/ui/src/server.js";
+import { createUiHandler } from "@majiwari/ui";
 import {
   createResidentRuntime,
   installResidentSignalHandlers,

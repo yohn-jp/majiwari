@@ -1,13 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { AdapterRegistry, AdapterState } from "@majiwari/registry";
 import { createRegistryGateway } from "@majiwari/gateway";
+import { resolveRepoRoot } from "../src/core.js";
 import { ADAPTER_ID, createManifest } from "../src/manifest.js";
+
+const execFileAsync = promisify(execFile);
+const DOCTOR_ENTRY = fileURLToPath(new URL("../src/doctor.js", import.meta.url));
 
 const EXPECTED_TOOL_NAMES = [
   "adapter_health",
@@ -177,5 +184,31 @@ test("adapter health is surfaced through the generic registry contract without l
     } finally {
       await registry.stop(ADAPTER_ID);
     }
+  });
+});
+
+test("OCR MCP health omits repo_root while the local doctor retains it", async () => {
+  await withFakeOcrOnPath(async () => {
+    const repoRoot = await resolveRepoRoot();
+    const registry = new AdapterRegistry();
+    registry.register(createManifest({ repo: repoRoot, stderr: "ignore" }));
+    await registry.start(ADAPTER_ID);
+
+    try {
+      const health = await registry.resource(ADAPTER_ID).mcpClient.callTool({ name: "adapter_health", arguments: {} });
+      assert.equal(health.isError, undefined);
+      assert.ok(!("repo_root" in health.structuredContent));
+      const healthText = health.content.map((entry) => entry.text ?? "").join(" ");
+      assert.ok(!healthText.includes(repoRoot));
+    } finally {
+      await registry.stop(ADAPTER_ID);
+    }
+
+    const { stdout } = await execFileAsync(process.execPath, [DOCTOR_ENTRY, "--repo", repoRoot], {
+      encoding: "utf8",
+      env: { ...process.env }
+    });
+    const localReport = JSON.parse(stdout);
+    assert.equal(localReport.repo_root, repoRoot);
   });
 });
