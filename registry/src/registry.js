@@ -24,6 +24,13 @@ export class UnknownAdapterError extends Error {
   }
 }
 
+export class AdapterAcquiredError extends Error {
+  constructor(id) {
+    super(`adapter "${id}" still holds an acquired resource; stop() it before unregister()`);
+    this.name = "AdapterAcquiredError";
+  }
+}
+
 export class TargetCapabilityUnsupportedError extends Error {
   constructor(id) {
     super(`adapter "${id}" does not implement the target-provider capability`);
@@ -86,6 +93,35 @@ export class AdapterRegistry {
 
   get(id) {
     return summarize(this.#requireEntry(id));
+  }
+
+  /**
+   * The raw handle acquired by the adapter's own transport.start(), or
+   * undefined when nothing is currently acquired. Opaque to the registry --
+   * it never inspects the handle's shape -- but exposed so a consumer that
+   * knows what a given transport kind's handle contains (e.g. a gateway
+   * bridging "stdio" adapters) can reach it without acquiring a second,
+   * redundant resource of its own.
+   */
+  resource(id) {
+    return this.#requireEntry(id).handle;
+  }
+
+  /**
+   * Remove a registered adapter's entry entirely, freeing its id for a
+   * fresh register(). Only valid while nothing is acquired -- a never-
+   * started registration, a cleanly stopped adapter, or a start() that
+   * failed without acquiring anything (see start() below) -- so a caller
+   * can safely clear a dead entry and retry the same id without ever
+   * dropping a resource on the floor. Throws AdapterAcquiredError if a
+   * resource is still held: releasing it is stop()'s job, not this one's.
+   */
+  unregister(id) {
+    const entry = this.#requireEntry(id);
+    if (entry.acquired) {
+      throw new AdapterAcquiredError(id);
+    }
+    this.#adapters.delete(id);
   }
 
   /**

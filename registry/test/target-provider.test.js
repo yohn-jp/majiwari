@@ -82,3 +82,42 @@ test("public and resolved schemas are distinct types", () => {
   assert.ok(!("descriptor" in publicTargetSchema.shape));
   assert.ok("descriptor" in resolvedTargetSchema.shape);
 });
+
+test("publicTargetSchema rejects non-JSON-safe metadata values", () => {
+  const nonJsonSafeValues = [
+    () => {},
+    10n,
+    Symbol("nope"),
+    new Map(),
+    new Date(),
+    undefined,
+    Number.NaN,
+    Number.POSITIVE_INFINITY
+  ];
+  for (const value of nonJsonSafeValues) {
+    assert.throws(
+      () => validatePublicTarget({ id: "wt-a1", metadata: { bad: value } }),
+      TargetProviderError,
+      `expected rejection for metadata value ${String(value)}`
+    );
+  }
+});
+
+test("publicTargetSchema accepts nested JSON-safe metadata (arrays and plain objects)", () => {
+  const target = validatePublicTarget({
+    id: "wt-a1",
+    metadata: { branch: "main", tags: ["a", "b"], nested: { ok: true, count: 2, missing: null } }
+  });
+  assert.deepEqual(target.metadata, { branch: "main", tags: ["a", "b"], nested: { ok: true, count: 2, missing: null } });
+});
+
+test("resolvedTargetSchema rejects non-JSON-safe metadata even though descriptor stays unrestricted", () => {
+  assert.throws(
+    () => validateResolvedTarget({ id: "wt-a1", metadata: { bad: () => {} }, descriptor: { absolutePath: "/srv/repo-a" } }),
+    TargetProviderError
+  );
+  // The internal descriptor itself is deliberately exempt from the
+  // JSON-safe contract -- it never crosses the public projection boundary.
+  const resolved = validateResolvedTarget({ id: "wt-a1", descriptor: { handle: () => {} } });
+  assert.equal(typeof resolved.descriptor.handle, "function");
+});

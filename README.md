@@ -1,6 +1,6 @@
 # Majiwari
 
-Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any stdio MCP server remotely over Cloudflare. **Alibaba OpenCodeReview (OCR) delegation is the first adapter**, not the platform's purpose.
+Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any stdio MCP server remotely over Cloudflare. **Alibaba OpenCodeReview (OCR) delegation is the first adapter**, not the platform's purpose. `adapters/inari/` wraps [Inari](https://github.com/yohn-jp/gh-inari) (`gh-inari`), a governed GitHub CLI for repository Issue/PR templates, as the second.
 
 > Adapters know what a tool means. The gateway knows only what MCP transport means. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -8,7 +8,9 @@ Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any s
 
 ```text
 adapters/open-code-review/   deterministic MCP tools wrapping the ocr CLI (stdio)
+adapters/inari/               deterministic MCP tools wrapping the inari CLI (stdio)
 gateway/                     generic stdio MCP -> Streamable HTTP transport, no adapter-specific logic
+registry/                     versioned adapter manifest schema and runtime registry
 deployments/cloudflare/      Named Tunnel + Worker (/mcp proxy, Access Managed OAuth) + their setup docs
 plugin/skills/                ChatGPT-facing Delegation Mode skill
 docs/                         architecture and ChatGPT connection docs
@@ -31,9 +33,10 @@ This project does not implement code review. OCR remains authoritative for deter
 
 ## Requirements
 
-- Node.js 20+
+- Node.js >=22.13
 - Git 2.41+
-- Alibaba OpenCodeReview (`ocr`)
+- Alibaba OpenCodeReview (`ocr`), for the OCR adapter
+- Inari (`gh-inari`) and an authenticated `gh`, for the Inari adapter
 - a Cloudflare account, for the Tunnel/Worker/Access Managed OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
 
 Install OCR:
@@ -45,6 +48,16 @@ ocr delegate preview --help
 ```
 
 Delegation Mode does **not** require OCR LLM credentials.
+
+Install Inari:
+
+```bash
+npm install -g gh-inari
+gh auth login
+inari --version --json
+```
+
+The Inari adapter uses the current `gh` authentication and the target repository's Git remote; it does not maintain a second credential store. `adapters/inari/src/core.js` checks Inari's machine-readable identity/protocol/capability contract (not a version pin -- any `gh-inari` release that still reports the expected identity, protocol version, and required capabilities is compatible) and fails `adapter_health` clearly, rather than silently, if the installed `inari` does not satisfy it. `.github/workflows/ci.yml`'s `inari-contract` job installs whatever `gh-inari` currently resolves (latest) and verifies the same contract.
 
 ## Install
 
@@ -77,6 +90,16 @@ npm run gateway -- --port 8787 -- node /absolute/path/to/majiwari/adapters/open-
 
 The gateway binds to `127.0.0.1` only and never inspects the tools it proxies -- any other stdio MCP server can be given to it the same way.
 
+Start the Inari adapter directly (stdio MCP) against one target Git checkout:
+
+```bash
+npm run inari -- --repo /absolute/path/to/target-repository
+```
+
+Equivalent environment-variable form: `INARI_REPO=/absolute/path/to/target-repository npm run inari`. Check its own prerequisites with `npm run inari:doctor -- --repo /absolute/path/to/target-repository`.
+
+Inari also registers through `registry/`'s `AdapterRegistry` and satisfies `gateway/`'s gateway-routable transport contract (`adapters/inari/src/manifest.js`, using `@majiwari/gateway`'s own `createStdioGatewayTransport`, the same convention OCR's manifest uses) -- so it can be hosted standalone through the registry (`npm run inari:registry`) or published on a `createRegistryGateway` instance at `/mcp/inari`, the same way OCR is published at `/mcp/open-code-review`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the manifest/registry/gateway contract.
+
 ## Connect to ChatGPT
 
 See [`docs/CHATGPT_SETUP.md`](docs/CHATGPT_SETUP.md) for the full path: exposing the gateway through a Cloudflare Named Tunnel ([`deployments/cloudflare/docs/TUNNEL.md`](deployments/cloudflare/docs/TUNNEL.md)), deploying the Worker in front of it ([`deployments/cloudflare/docs/WORKER.md`](deployments/cloudflare/docs/WORKER.md)), and confirming Access Managed OAuth ([`deployments/cloudflare/docs/OAUTH.md`](deployments/cloudflare/docs/OAUTH.md)) before registering the connector in ChatGPT.
@@ -94,6 +117,19 @@ See [`docs/CHATGPT_SETUP.md`](docs/CHATGPT_SETUP.md) for the full path: exposing
 
 There is deliberately no `review`, `fix`, `edit`, arbitrary `shell`, commit, or push tool. The gateway and Worker layers do not add one either -- they carry these tool names/schemas through unmodified.
 
+## MCP tools (`adapters/inari`)
+
+| Tool | Responsibility |
+| --- | --- |
+| `adapter_health` | verify Inari's identity/protocol/capability compatibility and GitHub authentication |
+| `inari_template_list` | discover repository-governed Issue/PR templates |
+| `inari_issue_schema` / `inari_pr_schema` | resolve a template's canonical field schema |
+| `inari_issue_get` / `inari_pr_get` | read an existing Issue/PR's canonical fields |
+| `inari_issue_validate` / `inari_pr_validate` | validate new field content, or classify an existing Issue/PR by number |
+| `inari_issue_create` / `inari_pr_create` | validate, render, and create a governed Issue/PR |
+
+Inari remains authoritative for template governance, semantic validation, and rendering; the adapter only translates arguments and normalizes results. There is no raw `gh` passthrough tool, and no `edit`/`normalize`/`sync` remediation tool in this initial surface.
+
 ## Review contract
 
 For every delegated review, the host LLM must:
@@ -108,8 +144,8 @@ The same contract is included in the MCP server instructions and in [`plugin/ski
 
 ## Security
 
-- fixed `ocr` / `git` executables only, `shell: false`, argument arrays
-- read-only MCP tools only, no repository mutation
+- fixed `ocr` / `inari` / `gh` / `git` executables only, `shell: false`, argument arrays
+- OCR's MCP tools are read-only; Inari's `*_create` tools are the only tools in this repository that mutate GitHub, and only after Inari's own validation and rendering succeed
 - path traversal / absolute path / symlink escape protection
 - unsafe Git refs and newline/NUL injection rejected
 - one configured repository per adapter process
@@ -124,3 +160,5 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 OpenCodeReview: https://github.com/alibaba/open-code-review
 
 The upstream project and Delegation Skill are Apache-2.0 licensed. This project preserves attribution and is intended to converge upstream rather than fork OCR's review behavior.
+
+Inari (`gh-inari`): https://github.com/yohn-jp/gh-inari, MIT licensed. This project preserves attribution and does not reimplement any Inari governance rule; the adapter only translates MCP calls to Inari's own CLI.

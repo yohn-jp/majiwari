@@ -179,6 +179,29 @@ export async function readRepoFile(repoRoot, relativePath, startLine, endLine) {
   return { path: relative, start_line: start, end_line: end, content: lines.slice(start - 1, end).join("\n") };
 }
 
+export async function checkAdapterHealth(repoRoot) {
+  const git = await runCommand("git", ["--version"], { cwd: repoRoot });
+  const ocr = await runCommand("ocr", ["--version"], { cwd: repoRoot });
+  const previewHelp = await runCommand("ocr", ["delegate", "preview", "--help"], { cwd: repoRoot });
+  const ruleHelp = await runCommand("ocr", ["delegate", "rule", "--help"], { cwd: repoRoot });
+  const scanHelp = await runCommand("ocr", ["scan", "--help"], { cwd: repoRoot });
+  const rulesCheckHelp = await runCommand("ocr", ["rules", "check", "--help"], { cwd: repoRoot });
+  const previewFormat = /--format/.test(previewHelp.stdout + previewHelp.stderr);
+  const ruleFormat = /--format/.test(ruleHelp.stdout + ruleHelp.stderr);
+  const scanPreviewFormat = /--preview/.test(scanHelp.stdout + scanHelp.stderr) && /--format/.test(scanHelp.stdout + scanHelp.stderr);
+  const rulesCheckSupported = /<file-path>/.test(rulesCheckHelp.stdout + rulesCheckHelp.stderr);
+  return {
+    ok: previewFormat && ruleFormat && scanPreviewFormat && rulesCheckSupported,
+    repo_root: repoRoot,
+    git_version: git.stdout.trim(),
+    ocr_version: ocr.stdout.trim(),
+    delegate_preview_json_supported: previewFormat,
+    delegate_rule_json_supported: ruleFormat,
+    scan_preview_json_supported: scanPreviewFormat,
+    rules_check_supported: rulesCheckSupported
+  };
+}
+
 export function parseJson(stdout, label) {
   try {
     return JSON.parse(stdout);

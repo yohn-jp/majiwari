@@ -36,6 +36,16 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+// A JSON-safe value: string, finite number, boolean, null, or an array/plain
+// object built entirely out of these. Explicitly excludes anything that
+// cannot round-trip through JSON.stringify/parse -- a function, BigInt,
+// Symbol, Map/Set, Date, class instance, undefined, or a number that is
+// NaN/Infinity -- so a public target's metadata can never carry a value a
+// remote client could not receive as-is.
+const jsonValueSchema = z.lazy(() =>
+  z.union([z.string(), z.number().finite(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
+);
+
 // Opaque identifier only: no path separators, `.`/`..` segments, or null
 // bytes, so a client-supplied value can never be mistaken for (or smuggled
 // through as) a filesystem path. Real identity/lookup stays owned by the
@@ -47,13 +57,14 @@ export const targetIdSchema = z
 // Safe-to-expose-to-remote-clients descriptor. Deliberately has no field for
 // an adapter-internal descriptor (e.g. a filesystem path) -- `.strict()`
 // means a provider that accidentally returns one here fails validation
-// instead of leaking it.
+// instead of leaking it. `metadata` values are restricted to JSON-safe
+// types by contract (see jsonValueSchema above), not by convention.
 export const publicTargetSchema = z
   .object({
     id: targetIdSchema,
     kind: z.string().min(1).optional(),
     displayName: z.string().min(1).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional()
+    metadata: z.record(z.string(), jsonValueSchema).optional()
   })
   .strict();
 
@@ -66,7 +77,10 @@ export const resolvedTargetSchema = z
     id: targetIdSchema,
     kind: z.string().min(1).optional(),
     displayName: z.string().min(1).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
+    metadata: z.record(z.string(), jsonValueSchema).optional(),
+    // Adapter-internal only, never projected to a remote client: unlike
+    // every other field here, this one is deliberately exempt from the
+    // JSON-safe contract above -- it stays opaque to the registry.
     descriptor: z.unknown()
   })
   .strict();
