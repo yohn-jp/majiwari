@@ -1,8 +1,16 @@
 import { z } from "zod";
+import { targetProviderContractSchema } from "./target-provider.js";
 
 export const MANIFEST_SCHEMA_VERSION = "1";
 
-const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
+/**
+ * Exported so a consumer that has to recognize an adapter id outside a full
+ * manifest -- the gateway's public `/mcp/:adapterId` path routing
+ * (`gateway/src/registry-gateway.js`) -- shares this exact syntax rather
+ * than approximating it, so nothing but a truly registrable id ever reaches
+ * `registry.get()`/`registry.resource()`.
+ */
+export const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export class AdapterManifestError extends Error {
@@ -46,7 +54,13 @@ const manifestSchema = z
     transport: transportSchema,
     health: z.custom(isFunction, { message: "health must be a function" }).optional(),
     listTools: z.custom(isFunction, { message: "listTools must be a function" }).optional(),
-    capabilities: z.array(z.string().min(1)).optional()
+    capabilities: z.array(z.string().min(1)).optional(),
+    // Optional target-provider capability (#26): opaque-target list/get/
+    // resolve/invalidate hooks for adapters that operate against
+    // selectable, adapter-defined targets. Absent by default -- an adapter
+    // that never sets this field is validated and behaves exactly as
+    // before.
+    targetProvider: targetProviderContractSchema.optional()
   })
   .strict();
 

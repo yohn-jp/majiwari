@@ -7,6 +7,7 @@ import {
   buildRuleArgs,
   buildRulesCheckArgs,
   buildScanPreviewArgs,
+  checkAdapterHealth,
   parseJson,
   parseServerArgs,
   readRepoFile,
@@ -67,26 +68,7 @@ server.registerTool(
     annotations: READ_ONLY
   },
   async () => {
-    const git = await runCommand("git", ["--version"], { cwd: repoRoot });
-    const ocr = await runCommand("ocr", ["--version"], { cwd: repoRoot });
-    const previewHelp = await runCommand("ocr", ["delegate", "preview", "--help"], { cwd: repoRoot });
-    const ruleHelp = await runCommand("ocr", ["delegate", "rule", "--help"], { cwd: repoRoot });
-    const scanHelp = await runCommand("ocr", ["scan", "--help"], { cwd: repoRoot });
-    const rulesCheckHelp = await runCommand("ocr", ["rules", "check", "--help"], { cwd: repoRoot });
-    const previewFormat = /--format/.test(previewHelp.stdout + previewHelp.stderr);
-    const ruleFormat = /--format/.test(ruleHelp.stdout + ruleHelp.stderr);
-    const scanPreviewFormat = /--preview/.test(scanHelp.stdout + scanHelp.stderr) && /--format/.test(scanHelp.stdout + scanHelp.stderr);
-    const rulesCheckSupported = /<file-path>/.test(rulesCheckHelp.stdout + rulesCheckHelp.stderr);
-    const data = {
-      ok: previewFormat && ruleFormat && scanPreviewFormat && rulesCheckSupported,
-      repo_root: repoRoot,
-      git_version: git.stdout.trim(),
-      ocr_version: ocr.stdout.trim(),
-      delegate_preview_json_supported: previewFormat,
-      delegate_rule_json_supported: ruleFormat,
-      scan_preview_json_supported: scanPreviewFormat,
-      rules_check_supported: rulesCheckSupported
-    };
+    const data = await checkAdapterHealth(repoRoot);
     return result(data, data.ok ? "OCR delegation adapter is ready." : "OCR is present, but full support was not detected for delegate preview/rule, scan preview, and rules check.");
   }
 );

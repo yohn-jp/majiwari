@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AdapterManifestError } from "../src/manifest.js";
-import { AdapterRegistry, AdapterState, DuplicateAdapterError, UnknownAdapterError } from "../src/registry.js";
+import { AdapterAcquiredError, AdapterRegistry, AdapterState, DuplicateAdapterError, UnknownAdapterError } from "../src/registry.js";
 import { createFailingFixtureManifest, createFixtureManifest, createFlakyStopFixtureManifest } from "./fixtures/fixture-adapter.js";
 
 test("register validates the manifest and reports the registered state", () => {
@@ -24,12 +24,27 @@ test("register rejects a duplicate id", () => {
   assert.throws(() => registry.register(createFixtureManifest("fixture-a").manifest), DuplicateAdapterError);
 });
 
-test("get/start/stop/health on an unknown id throw UnknownAdapterError", async () => {
+test("get/start/stop/health/resource on an unknown id throw UnknownAdapterError", async () => {
   const registry = new AdapterRegistry();
   assert.throws(() => registry.get("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.start("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.stop("missing"), UnknownAdapterError);
   await assert.rejects(() => registry.health("missing"), UnknownAdapterError);
+  assert.throws(() => registry.resource("missing"), UnknownAdapterError);
+});
+
+test("resource() exposes the acquired handle only once start() has resolved, and clears it after stop()", async () => {
+  const registry = new AdapterRegistry();
+  const { manifest } = createFixtureManifest("fixture-a");
+  registry.register(manifest);
+
+  assert.equal(registry.resource("fixture-a"), undefined);
+
+  await registry.start("fixture-a");
+  assert.deepEqual(registry.resource("fixture-a"), { id: "fixture-a", pid: 1 });
+
+  await registry.stop("fixture-a");
+  assert.equal(registry.resource("fixture-a"), undefined);
 });
 
 test("two adapters coexist and shut down independently", async () => {
@@ -161,6 +176,51 @@ test("a failed stop leaves the resource held and is safely retryable", async () 
   // re-invoke transport.stop() -- no repeated/invalid cleanup calls.
   await registry.stop("fixture-flaky");
   assert.equal(flaky.calls.stopped, 2);
+});
+
+test("unregister() clears a never-started entry so the same id can be registered again", () => {
+  const registry = new AdapterRegistry();
+  registry.register(createFixtureManifest("fixture-a").manifest);
+
+  registry.unregister("fixture-a");
+  assert.throws(() => registry.get("fixture-a"), UnknownAdapterError);
+
+  const entry = registry.register(createFixtureManifest("fixture-a").manifest);
+  assert.equal(entry.id, "fixture-a");
+});
+
+test("unregister() clears a failed start (nothing acquired), unblocking a retry of the same id", async () => {
+  const registry = new AdapterRegistry();
+  registry.register(createFailingFixtureManifest("fixture-broken", "boom").manifest);
+  const started = await registry.start("fixture-broken");
+  assert.equal(started.state, AdapterState.ERRORED);
+
+  registry.unregister("fixture-broken");
+  assert.throws(() => registry.get("fixture-broken"), UnknownAdapterError);
+
+  // A duplicate-id collision no longer blocks retrying the same id.
+  const retried = registry.register(createFixtureManifest("fixture-broken").manifest);
+  assert.equal(retried.id, "fixture-broken");
+  assert.equal((await registry.start("fixture-broken")).state, AdapterState.RUNNING);
+});
+
+test("unregister() refuses to clear an entry whose resource is still acquired", async () => {
+  const registry = new AdapterRegistry();
+  registry.register(createFixtureManifest("fixture-a").manifest);
+  await registry.start("fixture-a");
+
+  assert.throws(() => registry.unregister("fixture-a"), AdapterAcquiredError);
+  // The entry, and its acquired resource, are untouched by the refusal.
+  assert.equal(registry.get("fixture-a").state, AdapterState.RUNNING);
+
+  await registry.stop("fixture-a");
+  registry.unregister("fixture-a");
+  assert.throws(() => registry.get("fixture-a"), UnknownAdapterError);
+});
+
+test("unregister() on an unknown id throws UnknownAdapterError", () => {
+  const registry = new AdapterRegistry();
+  assert.throws(() => registry.unregister("missing"), UnknownAdapterError);
 });
 
 test("start() refuses to re-acquire while a failed stop still holds the resource", async () => {

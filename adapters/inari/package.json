@@ -1,9 +1,9 @@
 {
-  "name": "@majiwari/adapter-open-code-review",
+  "name": "@majiwari/adapter-inari",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-only MCP adapter that exposes OpenCodeReview delegation mode to ChatGPT.",
+  "description": "Read-only/governed MCP adapter that exposes Inari (gh-inari) repository governance to MCP clients.",
   "scripts": {
     "start": "node src/server.js",
     "start:registry": "node src/runtime.js",
