@@ -48,13 +48,14 @@ export function createManifest({ repo } = {}) {
         resource = undefined;
       }
     },
-    // Re-derives Inari's own compatibility (installed version/protocol) and
-    // GitHub auth deterministically on every call rather than asking the
-    // running child, and strips `repo_root` (an absolute host filesystem
-    // path) before returning, since this detail feeds the generic registry
-    // health/status contract, which is public surface: it must never leak
-    // a local filesystem path, unlike the `adapter_health` MCP tool's own
-    // documented output, which keeps it.
+    // Re-derives Inari's own compatibility (identity/protocol/capabilities)
+    // and GitHub auth deterministically on every call rather than asking
+    // the running child, and strips `repo_root` (an absolute host
+    // filesystem path) before returning, since this detail feeds the
+    // generic registry health/status contract, which is public surface: it
+    // must never leak a local filesystem path. The `adapter_health` MCP
+    // tool (src/server.js) strips the same field from its own output for
+    // the same reason; only `doctor.js`'s local-only report keeps it.
     health: async () => {
       const repoRoot = await resolveRepoRoot(repo);
       const { repo_root: _repoRoot, ...publicHealth } = await checkAdapterHealth(repoRoot);

@@ -13,13 +13,12 @@ import {
   checkAdapterHealth,
   EXPECTED_INARI_NAME,
   EXPECTED_INARI_PROTOCOL,
-  MINIMUM_INARI_VERSION,
   parseJson,
   parseServerArgs,
+  REQUIRED_INARI_CAPABILITIES,
   runInari,
   validateArtifactNumber,
-  validateToken,
-  versionAtLeast
+  validateToken
 } from "../src/core.js";
 
 test("server args accept an explicit repository", () => {
@@ -125,19 +124,11 @@ test("runInari invokes the configured inari binary and parses its JSON stdout", 
   }
 });
 
-test("versionAtLeast compares major.minor.patch deterministically", () => {
-  assert.equal(versionAtLeast("0.8.0", "0.8.0"), true);
-  assert.equal(versionAtLeast("0.8.1", "0.8.0"), true);
-  assert.equal(versionAtLeast("1.0.0", "0.8.0"), true);
-  assert.equal(versionAtLeast("0.7.9", "0.8.0"), false);
-  assert.equal(versionAtLeast("not-a-version", "0.8.0"), false);
-  assert.equal(versionAtLeast(undefined, "0.8.0"), false);
-});
-
 /**
  * Fake `inari`/`gh` binaries on PATH, so `checkAdapterHealth()`'s compatibility
- * decision (name/protocol/version match, GitHub auth) can be asserted without
- * depending on the real `gh-inari` CLI being installed wherever this suite runs.
+ * decision (identity/protocol/capability match, GitHub auth) can be asserted
+ * without depending on the real `gh-inari` CLI being installed wherever this
+ * suite runs.
  */
 async function withFakeBinaries({ inari, gh = "#!/bin/sh\nexit 0\n" }, fn) {
   const dir = await mkdtemp(path.join(tmpdir(), "inari-adapter-fake-"));
@@ -157,18 +148,45 @@ async function withFakeBinaries({ inari, gh = "#!/bin/sh\nexit 0\n" }, fn) {
   }
 }
 
-function fakeInariScript({ name = EXPECTED_INARI_NAME, protocol = EXPECTED_INARI_PROTOCOL, version = MINIMUM_INARI_VERSION } = {}) {
-  const payload = JSON.stringify({ ok: true, name, version, protocol, capabilities: [] });
+function fakeInariScript({
+  name = EXPECTED_INARI_NAME,
+  protocol = EXPECTED_INARI_PROTOCOL,
+  version = "0.8.0",
+  capabilities = REQUIRED_INARI_CAPABILITIES
+} = {}) {
+  const payload = JSON.stringify({ ok: true, name, version, protocol, capabilities });
   return `#!/bin/sh\necho '${payload}'\n`;
 }
 
-test("checkAdapterHealth reports ok when inari's name/protocol/version and gh auth all match", async () => {
+test("checkAdapterHealth reports ok when inari's identity/protocol/capabilities and gh auth all match", async () => {
   await withFakeBinaries({ inari: fakeInariScript() }, async (dir) => {
     const health = await checkAdapterHealth(dir);
     assert.equal(health.ok, true);
     assert.equal(health.inari_compatible, true);
     assert.equal(health.github_authenticated, true);
     assert.equal(health.detail, undefined);
+  });
+});
+
+test("checkAdapterHealth reports ok for a newer/older inari version, as long as identity/protocol/capabilities still match (not a version pin)", async () => {
+  await withFakeBinaries({ inari: fakeInariScript({ version: "99.0.0" }) }, async (dir) => {
+    const health = await checkAdapterHealth(dir);
+    assert.equal(health.ok, true);
+    assert.equal(health.inari_compatible, true);
+  });
+  await withFakeBinaries({ inari: fakeInariScript({ version: "0.0.1" }) }, async (dir) => {
+    const health = await checkAdapterHealth(dir);
+    assert.equal(health.ok, true);
+    assert.equal(health.inari_compatible, true);
+  });
+});
+
+test("checkAdapterHealth fails clearly on an identity mismatch", async () => {
+  await withFakeBinaries({ inari: fakeInariScript({ name: "not-gh-inari" }) }, async (dir) => {
+    const health = await checkAdapterHealth(dir);
+    assert.equal(health.ok, false);
+    assert.equal(health.inari_compatible, false);
+    assert.match(health.detail, /expected the "gh-inari" CLI/);
   });
 });
 
@@ -181,12 +199,13 @@ test("checkAdapterHealth fails clearly on a protocol mismatch", async () => {
   });
 });
 
-test("checkAdapterHealth fails clearly on an installed version older than the minimum supported", async () => {
-  await withFakeBinaries({ inari: fakeInariScript({ version: "0.1.0" }) }, async (dir) => {
+test("checkAdapterHealth fails clearly when a required capability is missing", async () => {
+  await withFakeBinaries({ inari: fakeInariScript({ capabilities: [] }) }, async (dir) => {
     const health = await checkAdapterHealth(dir);
     assert.equal(health.ok, false);
     assert.equal(health.inari_compatible, false);
-    assert.match(health.detail, /older than the minimum supported version/);
+    assert.match(health.detail, /missing required capabilities/);
+    assert.match(health.detail, /machine-readable-version/);
   });
 });
 
@@ -197,5 +216,12 @@ test("checkAdapterHealth fails clearly when gh reports no authenticated account"
     assert.equal(health.inari_compatible, true);
     assert.equal(health.github_authenticated, false);
     assert.match(health.detail, /not report an authenticated account/);
+  });
+});
+
+test("checkAdapterHealth's local report keeps repo_root -- it is stripped only by the public MCP tool and registry health, not by core.js itself", async () => {
+  await withFakeBinaries({ inari: fakeInariScript() }, async (dir) => {
+    const health = await checkAdapterHealth(dir);
+    assert.equal(health.repo_root, dir);
   });
 });

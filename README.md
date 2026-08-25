@@ -57,7 +57,7 @@ gh auth login
 inari --version --json
 ```
 
-The Inari adapter uses the current `gh` authentication and the target repository's Git remote; it does not maintain a second credential store. `adapters/inari/src/core.js` pins the exact `gh-inari` name/protocol/minimum-version contract this adapter is written against (also verified against the real CLI by `.github/workflows/ci.yml`'s `inari-contract` job) and fails `adapter_health` clearly, rather than silently, if the installed `inari` does not match it.
+The Inari adapter uses the current `gh` authentication and the target repository's Git remote; it does not maintain a second credential store. `adapters/inari/src/core.js` checks Inari's machine-readable identity/protocol/capability contract (not a version pin -- any `gh-inari` release that still reports the expected identity, protocol version, and required capabilities is compatible) and fails `adapter_health` clearly, rather than silently, if the installed `inari` does not satisfy it. `.github/workflows/ci.yml`'s `inari-contract` job installs whatever `gh-inari` currently resolves (latest) and verifies the same contract.
 
 ## Install
 
@@ -121,7 +121,7 @@ There is deliberately no `review`, `fix`, `edit`, arbitrary `shell`, commit, or 
 
 | Tool | Responsibility |
 | --- | --- |
-| `adapter_health` | verify Inari availability/version/protocol compatibility and GitHub authentication |
+| `adapter_health` | verify Inari's identity/protocol/capability compatibility and GitHub authentication |
 | `inari_template_list` | discover repository-governed Issue/PR templates |
 | `inari_issue_schema` / `inari_pr_schema` | resolve a template's canonical field schema |
 | `inari_issue_get` / `inari_pr_get` | read an existing Issue/PR's canonical fields |

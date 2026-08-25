@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { AdapterRegistry, AdapterState } from "@majiwari/registry";
 import { createRegistryGateway, createStdioGatewayTransport } from "@majiwari/gateway";
+import { resolveRepoRoot } from "../src/core.js";
 import { ADAPTER_ID, createManifest } from "../src/manifest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,9 +88,10 @@ function createSiblingManifest(id) {
  * gateway/registry contract (registration, lifecycle, publication, tool
  * surface, a real tool call round trip) without depending on the real
  * `gh-inari` CLI or GitHub credentials being present in the environment
- * that runs it. The real, pinned `gh-inari` CLI's own machine-readable
- * surface is separately verified against the real binary by
- * `.github/workflows/ci.yml`'s `inari-contract` job.
+ * that runs it. The real `gh-inari` CLI's own machine-readable protocol/
+ * capability surface is separately verified against the real, currently
+ * resolved (not pinned) binary by `.github/workflows/ci.yml`'s
+ * `inari-contract` job.
  */
 function withFakeInariOnPath(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inari-gateway-fake-"));
@@ -100,7 +102,7 @@ function withFakeInariOnPath(fn) {
     [
       "#!/bin/sh",
       'if [ "$1" = "--version" ]; then',
-      "  echo '{\"ok\":true,\"name\":\"gh-inari\",\"version\":\"0.8.0\",\"protocol\":1,\"capabilities\":[\"canonical-invocation\"]}'",
+      "  echo '{\"ok\":true,\"name\":\"gh-inari\",\"version\":\"0.8.0\",\"protocol\":1,\"capabilities\":[\"canonical-invocation\",\"machine-readable-version\"]}'",
       "  exit 0",
       "fi",
       'if [ "$1" = "template" ] && [ "$2" = "list" ]; then',
@@ -179,6 +181,14 @@ test("Inari adapter registers, starts, and is published through the gateway at /
       assert.equal(health.structuredContent.inari_compatible, true);
       assert.equal(health.structuredContent.github_authenticated, true);
 
+      // adapter_health is a remote MCP surface: it must never expose the
+      // host's absolute repository path, in the structured result or its
+      // text summary.
+      assert.ok(!("repo_root" in health.structuredContent));
+      const expectedRepoRoot = await resolveRepoRoot();
+      const healthText = health.content.map((entry) => entry.text ?? "").join(" ");
+      assert.ok(!healthText.includes(expectedRepoRoot), "adapter_health text leaked the local repository path");
+
       // A representative read-only structured Inari operation, executed
       // end to end through the published gateway endpoint.
       const templates = await client.callTool({ name: "inari_template_list", arguments: {} });
@@ -223,7 +233,7 @@ test("manifest health() surfaces Inari compatibility flags but strips the reposi
     assert.equal(health.ok, true);
     assert.equal(health.inari_compatible, true);
     assert.equal(typeof health.inari_version, "string");
-    assert.equal(health.repo_root, undefined);
+    assert.ok(!("repo_root" in health));
   });
 });
 
@@ -237,7 +247,7 @@ test("adapter health is surfaced through the generic registry contract without l
       assert.equal(health.id, ADAPTER_ID);
       assert.equal(health.state, AdapterState.RUNNING);
       assert.equal(health.ok, true);
-      assert.equal(health.detail.repo_root, undefined);
+      assert.ok(!("repo_root" in health.detail));
     } finally {
       await registry.stop(ADAPTER_ID);
     }

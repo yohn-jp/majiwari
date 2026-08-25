@@ -56,11 +56,10 @@ server.registerTool(
   "adapter_health",
   {
     title: "Check Inari adapter",
-    description: "Verify the configured repository, Inari CLI availability/version/protocol compatibility, and GitHub authentication prerequisites before calling any other tool. Never returns credential values.",
+    description: "Verify Inari's protocol/capability compatibility and GitHub authentication prerequisites before calling any other tool. Never returns credential values or the host's local filesystem paths.",
     inputSchema: {},
     outputSchema: {
       ok: z.boolean(),
-      repo_root: z.string(),
       inari_version: z.string().optional(),
       inari_protocol: z.number().optional(),
       inari_capabilities: z.array(z.string()).optional(),
@@ -71,7 +70,10 @@ server.registerTool(
     annotations: READ_ONLY
   },
   async () => {
-    const data = await checkAdapterHealth(repoRoot);
+    // repo_root is an absolute host filesystem path -- local diagnostic
+    // detail, never returned on this remote MCP surface (kept in
+    // doctor.js's own local-only output instead).
+    const { repo_root: _repoRoot, ...data } = await checkAdapterHealth(repoRoot);
     return result(data, data.ok ? "Inari adapter is ready." : "Inari or GitHub authentication is not ready.");
   }
 );

@@ -45,18 +45,19 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      # Pinned to an exact version, not the floating `gh-inari` (latest) tag:
-      # adapters/inari/src/core.js's EXPECTED_INARI_NAME/EXPECTED_INARI_PROTOCOL/
-      # MINIMUM_INARI_VERSION are written against this exact contract, so a
-      # future gh-inari release cannot silently change what this job (or the
-      # adapter's own runtime compatibility check) validates against. Bump
-      # both together.
-      - run: npm install --global gh-inari@0.8.0
-      - name: Verify machine-readable version surface and governed command set
+      # Not pinned: installs whatever gh-inari currently resolves (latest),
+      # the same way a real operator would. adapters/inari/src/core.js's
+      # EXPECTED_INARI_NAME/EXPECTED_INARI_PROTOCOL/REQUIRED_INARI_CAPABILITIES
+      # are a protocol/capability boundary, not a version pin -- this job
+      # verifies the exact same machine-readable contract the adapter's own
+      # runtime compatibility check (checkAdapterHealth()) validates, so any
+      # gh-inari release that still satisfies it passes with no change here.
+      - run: npm install --global gh-inari
+      - name: Verify machine-readable protocol/capability surface and governed command set
         run: |
           inari --version --json | grep -- '"name":"gh-inari"'
           inari --version --json | grep -- '"protocol":1'
-          inari --version --json | grep -- '"version":"0.8.0"'
+          inari --version --json | grep -- '"machine-readable-version"'
           inari issue --help | grep -- 'issue schema'
           inari issue --help | grep -- 'issue get'
           inari issue --help | grep -- 'issue create'

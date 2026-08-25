@@ -10,16 +10,20 @@ export const DEFAULT_MAX_BUFFER = Number(process.env.INARI_ADAPTER_MAX_BUFFER ??
 export const MAX_FIELDS = 200;
 
 /**
- * The `gh-inari` machine-readable contract (`inari --version --json`) this
- * adapter is written against and that `.github/workflows/ci.yml`'s
- * `inari-contract` job installs and verifies against. Bumping the CLI
- * requires bumping this constant (and the CI pin) in the same change,
- * rather than the adapter silently trusting whatever `gh-inari` version
- * happens to be on `PATH`.
+ * The `gh-inari` machine-readable compatibility boundary (`inari --version
+ * --json`) this adapter checks before trusting the installed CLI: identity
+ * (`name`), the discrete `protocol` contract version, and the advertised
+ * `capabilities` this adapter actually depends on. Deliberately *not* a
+ * semantic-version pin -- any `gh-inari` release, present or future, that
+ * still reports this identity/protocol and still advertises these
+ * capabilities is compatible, with no Majiwari change required. A release
+ * that changes `protocol` or drops a required capability is the only thing
+ * that fails this check, and fails it with a `detail` naming exactly what
+ * is incompatible (see `checkAdapterHealth()` below).
  */
 export const EXPECTED_INARI_NAME = "gh-inari";
 export const EXPECTED_INARI_PROTOCOL = 1;
-export const MINIMUM_INARI_VERSION = "0.8.0";
+export const REQUIRED_INARI_CAPABILITIES = ["machine-readable-version"];
 
 export function parseServerArgs(argv = []) {
   const result = { repo: undefined, help: false };
@@ -189,32 +193,21 @@ export async function runInari(args, { cwd, label }) {
   return parseJson(completed.stdout, label);
 }
 
-function parseVersionParts(value) {
-  const match = /^(?:v)?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(value ?? "");
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
-}
-
-/** Deterministic `major.minor.patch` comparison, matching gh-inari's own `--minimum-version` semantics. */
-export function versionAtLeast(actual, minimum) {
-  const actualParts = parseVersionParts(actual);
-  const minimumParts = parseVersionParts(minimum);
-  if (!actualParts || !minimumParts) return false;
-  for (let index = 0; index < actualParts.length; index += 1) {
-    if (actualParts[index] !== minimumParts[index]) return actualParts[index] > minimumParts[index];
-  }
-  return true;
-}
-
 /**
  * Verify the configured repository, Inari's own machine-readable
  * compatibility surface (`inari --version --json`: expected `name`,
- * `protocol`, and a minimum `version`), and GitHub authentication
- * (`gh auth status`, whose output/credential value is never relayed --
- * only its exit code decides `github_authenticated`). Returns a single
- * structured report shared by `adapter_health`, `doctor.js`, and the
- * manifest's own `health()`; a version/protocol mismatch fails `ok`
- * deterministically with a `detail` naming exactly what is incompatible,
- * rather than the adapter silently trusting whatever `inari` is on `PATH`.
+ * `protocol`, and every capability in `REQUIRED_INARI_CAPABILITIES`), and
+ * GitHub authentication (`gh auth status`, whose output/credential value
+ * is never relayed -- only its exit code decides `github_authenticated`).
+ * Returns a single structured report shared by `adapter_health`,
+ * `doctor.js`, and the manifest's own `health()`; a protocol or missing-
+ * capability mismatch fails `ok` deterministically with a `detail` naming
+ * exactly what is incompatible, rather than the adapter silently trusting
+ * whatever `inari` is on `PATH`. This is a protocol/capability boundary,
+ * not a version pin -- `inari_version` is reported for information only
+ * and never gates `ok`, so a newer (or older) `gh-inari` release that still
+ * satisfies the same identity/protocol/capability contract works with no
+ * Majiwari change.
  */
 export async function checkAdapterHealth(repoRoot) {
   const version = await runCommand("inari", ["--version", "--json"], { cwd: repoRoot, allowExitCodes: [0, 1, 2] });
@@ -228,16 +221,17 @@ export async function checkAdapterHealth(repoRoot) {
 
   const nameMatches = versionInfo.name === EXPECTED_INARI_NAME;
   const protocolMatches = versionInfo.protocol === EXPECTED_INARI_PROTOCOL;
-  const versionSupported = versionAtLeast(versionInfo.version, MINIMUM_INARI_VERSION);
-  const compatible = Boolean(versionInfo.ok) && nameMatches && protocolMatches && versionSupported;
+  const advertisedCapabilities = Array.isArray(versionInfo.capabilities) ? versionInfo.capabilities : [];
+  const missingCapabilities = REQUIRED_INARI_CAPABILITIES.filter((capability) => !advertisedCapabilities.includes(capability));
+  const compatible = Boolean(versionInfo.ok) && nameMatches && protocolMatches && missingCapabilities.length === 0;
 
   if (!compatible && incompatibilityDetail === undefined) {
     if (!nameMatches) {
       incompatibilityDetail = `expected the "${EXPECTED_INARI_NAME}" CLI, found "${versionInfo.name ?? "unknown"}"`;
     } else if (!protocolMatches) {
       incompatibilityDetail = `expected inari protocol ${EXPECTED_INARI_PROTOCOL}, found ${versionInfo.protocol ?? "unknown"}`;
-    } else if (!versionSupported) {
-      incompatibilityDetail = `inari ${versionInfo.version ?? "unknown"} is older than the minimum supported version ${MINIMUM_INARI_VERSION}`;
+    } else if (missingCapabilities.length > 0) {
+      incompatibilityDetail = `inari is missing required capabilities: ${missingCapabilities.join(", ")}`;
     }
   }
 
