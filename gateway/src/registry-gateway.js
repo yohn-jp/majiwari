@@ -143,12 +143,11 @@ function createRoutingServer({ bridges, host, port, registry }) {
       }
     );
     proxyRequest.on("error", (error) => {
-      // Logs the internal bridge's own address, not adapterId: adapterId is
-      // parsed straight out of the public request path, and this internal
-      // target (always loopback, its port assigned by this module itself)
-      // identifies the same failure without ever writing a request-derived
-      // value into a log line.
-      console.error(`[majiwari-gateway] error proxying to internal bridge ${bridge.host}:${bridge.port}`, error);
+      // No request-derived value (not adapterId, not even bridge, which was
+      // looked up by it) is interpolated into this log line -- only a fixed
+      // string and the Error object itself, so nothing about this write can
+      // trace back to the request that triggered it.
+      console.error("[majiwari-gateway] error proxying a request to an adapter's internal bridge", error);
       if (res.headersSent) res.destroy();
       else res.writeHead(502).end();
     });
