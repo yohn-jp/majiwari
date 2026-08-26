@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { parseTargetId, TargetProviderError, validateResolvedTarget } from "@majiwari/registry";
+import { parseTargetId, TargetNotFoundError, TargetUnavailableError, validateResolvedTarget } from "@majiwari/registry";
 import { extractDescriptorRepoRoot, resolveRepoRoot } from "./core.js";
 import { createOcrServer } from "./build-server.js";
 
@@ -26,11 +26,17 @@ function createManagedResolveContext(targetProvider) {
     try {
       resolved = await targetProvider.resolve(safeId);
     } catch (error) {
-      // TargetNotFoundError/TargetUnavailableError echo only the caller's
-      // own opaque targetId back -- safe to propagate as-is. Anything else
-      // is an unexpected provider failure; never forward its raw message,
-      // which could contain adapter-internal detail.
-      if (error instanceof TargetProviderError) throw error;
+      // Only these two exact, registry-defined error shapes are trusted to
+      // reach an MCP response unchanged -- both are hard-coded to embed
+      // nothing but the caller's own opaque targetId
+      // (`no target registered with id "<id>"` / `target "<id>" is
+      // unavailable`), never adapter-internal detail. Any other error --
+      // including a *subclass* of the base TargetProviderError, which a
+      // provider implementation is free to throw with an arbitrary message
+      // (e.g. one that embeds a resolved worktree path) -- is normalized
+      // instead of forwarded, so a custom/unexpected provider failure can
+      // never leak internal detail through this boundary.
+      if (error instanceof TargetNotFoundError || error instanceof TargetUnavailableError) throw error;
       throw new Error(`failed to resolve target "${safeId}"`);
     }
 

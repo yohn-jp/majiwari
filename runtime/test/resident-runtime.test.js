@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { AdapterState } from "@majiwari/registry";
 import { createRegistryGateway, createStdioGatewayTransport } from "@majiwari/gateway";
@@ -16,6 +19,8 @@ import {
   installResidentSignalHandlers,
   TRUSTED_RESIDENT_CATALOG
 } from "../src/index.js";
+
+const execFileAsync = promisify(execFile);
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const PROBE_SERVER = fileURLToPath(new URL("../../gateway/test/fixtures/probe-server.mjs", import.meta.url));
@@ -402,4 +407,97 @@ test("SIGINT/SIGTERM and concurrent shutdown share one cleanup path", async () =
 
 test("the default resident catalog contains only the two trusted adapters", () => {
   assert.deepEqual(Object.keys(TRUSTED_RESIDENT_CATALOG).sort(), ["inari", "open-code-review"]);
+});
+
+async function createGitRepo(prefix, content) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  await execFileAsync("git", ["init", "-q"], { cwd: dir });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  await execFileAsync("git", ["config", "user.name", "Test"], { cwd: dir });
+  await writeFile(path.join(dir, "file.txt"), content);
+  await execFileAsync("git", ["add", "-A"], { cwd: dir });
+  await execFileAsync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
+  return dir;
+}
+
+/**
+ * #29's real end-to-end path: `npm run resident` reads config through the
+ * unmodified `TRUSTED_RESIDENT_CATALOG` (no catalog override -- this is
+ * exactly what the CLI uses), and the resident config's `targets` shape
+ * (`config.js`) switches OCR to managed, target-aware execution
+ * (`createManifest({ targetProvider })`, an injected local target provider
+ * built from these same targets). One resident process, one OCR adapter
+ * entry, published once at `/mcp/open-code-review`; two configured targets
+ * are both reachable through it without an adapter restart, and each call
+ * only ever sees its own target's content.
+ */
+test("resident runtime serves two managed OCR targets through /mcp/open-code-review from one adapter, no restart, no cross-talk", async () => {
+  const port = await getFreePort();
+  const repoA = await createGitRepo("majiwari-resident-target-a-", "hello from target-a\n");
+  const repoB = await createGitRepo("majiwari-resident-target-b-", "hello from target-b\n");
+  const runtime = createResidentRuntime({
+    version: 1,
+    port,
+    adapters: {
+      "open-code-review": {
+        enabled: true,
+        targets: [
+          { id: "target-a", repo: repoA },
+          { id: "target-b", repo: repoB }
+        ]
+      }
+    }
+  });
+  let client;
+  try {
+    await runtime.start();
+    assert.deepEqual(runtime.attachedAdapterIds, ["open-code-review"]);
+    assert.equal(runtime.registry.get("open-code-review").state, AdapterState.RUNNING);
+
+    client = await connectClient(port, "open-code-review");
+
+    const readA = await client.callTool({ name: "repo_read_file", arguments: { path: "file.txt", targetId: "target-a" } });
+    const readB = await client.callTool({ name: "repo_read_file", arguments: { path: "file.txt", targetId: "target-b" } });
+    assert.equal(readA.structuredContent.content, "hello from target-a\n");
+    assert.equal(readB.structuredContent.content, "hello from target-b\n");
+
+    // Same adapter entry, same published endpoint, never restarted between
+    // the two targets above.
+    assert.equal(runtime.registry.get("open-code-review").state, AdapterState.RUNNING);
+
+    const [concurrentA, concurrentB] = await Promise.all([
+      client.callTool({ name: "repo_search", arguments: { query: "target-a", targetId: "target-a" } }),
+      client.callTool({ name: "repo_search", arguments: { query: "target-b", targetId: "target-b" } })
+    ]);
+    assert.match(concurrentA.structuredContent.matches, /target-a/);
+    assert.doesNotMatch(concurrentA.structuredContent.matches, /target-b/);
+    assert.match(concurrentB.structuredContent.matches, /target-b/);
+    assert.doesNotMatch(concurrentB.structuredContent.matches, /target-a/);
+
+    const missingTargetId = await client.callTool({ name: "repo_read_file", arguments: { path: "file.txt" } });
+    assert.equal(missingTargetId.isError, true);
+
+    const list = await (await fetch(`http://127.0.0.1:${port}/ui/api/adapters`)).json();
+    assert.ok(!JSON.stringify(list).includes(repoA));
+    assert.ok(!JSON.stringify(list).includes(repoB));
+  } finally {
+    await client?.close().catch(() => {});
+    await runtime.shutdown();
+    await rm(repoA, { recursive: true, force: true });
+    await rm(repoB, { recursive: true, force: true });
+  }
+});
+
+test("resident config rejects inari 'targets' (single-repository only) before it can leave the adapter running", async () => {
+  const port = await getFreePort();
+  const runtime = createResidentRuntime({
+    version: 1,
+    port,
+    adapters: { inari: { enabled: true, targets: [{ id: "a", repo: path.resolve(os.tmpdir()) }] } }
+  });
+  try {
+    await assert.rejects(() => runtime.start(), /inari does not support/);
+  } finally {
+    await runtime.shutdown();
+  }
 });

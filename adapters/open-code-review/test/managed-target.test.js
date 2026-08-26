@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { AdapterRegistry, AdapterState } from "@majiwari/registry";
+import { AdapterRegistry, AdapterState, TargetProviderError } from "@majiwari/registry";
 import { createRegistryGateway } from "@majiwari/gateway";
 import { ADAPTER_ID, createManifest } from "../src/manifest.js";
 import { createLocalTargetProvider } from "../src/local-target-provider.js";
@@ -296,6 +296,53 @@ test("malformed resolved descriptors fail closed without touching git/OCR/filesy
     try {
       const response = await mcpClient.callTool({ name: "repo_read_file", arguments: { path: "file.txt", targetId: "bad-target" } });
       assert.equal(response.isError, true, `descriptor ${JSON.stringify(descriptor)} must fail closed`);
+    } finally {
+      await registry.stop(ADAPTER_ID);
+    }
+  }
+});
+
+function providerThrowing(error) {
+  return {
+    schemaVersion: "1",
+    list: async () => [],
+    get: async () => {
+      throw new Error("not used in this test");
+    },
+    resolve: async () => {
+      throw error;
+    },
+    invalidate: async () => ({ id: "bad-target", invalidated: true })
+  };
+}
+
+test("unexpected/custom provider failures from resolve() are normalized and never forwarded to MCP unchanged", async () => {
+  const secretPath = "/abs/secret/worktree-should-not-leak";
+
+  // A base TargetProviderError (or any custom subclass a provider is free to
+  // throw) is *not* one of the two exact, registry-defined shapes
+  // (TargetNotFoundError/TargetUnavailableError) whose message is guaranteed
+  // to embed nothing but the caller's own targetId -- so it must never reach
+  // an MCP response unchanged, even though it is "a TargetProviderError".
+  class CustomProviderFailure extends TargetProviderError {
+    constructor(message) {
+      super(message);
+      this.name = "CustomProviderFailure";
+    }
+  }
+
+  for (const error of [
+    new TargetProviderError(`resolve failed while inspecting worktree ${secretPath}`),
+    new CustomProviderFailure(`worktree ${secretPath} is corrupted`),
+    new Error(`unexpected failure touching ${secretPath}`)
+  ]) {
+    const { registry, mcpClient } = await startManaged(providerThrowing(error));
+    try {
+      const response = await mcpClient.callTool({ name: "repo_read_file", arguments: { path: "file.txt", targetId: "any-target" } });
+      assert.equal(response.isError, true);
+      const text = JSON.stringify(response.content);
+      assert.ok(!text.includes(secretPath), `must not leak the provider's internal path for ${error.constructor.name}`);
+      assert.ok(!text.includes("corrupted") && !text.includes("inspecting"), `must not forward the provider's raw message for ${error.constructor.name}`);
     } finally {
       await registry.stop(ADAPTER_ID);
     }
