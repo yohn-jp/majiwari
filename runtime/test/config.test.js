@@ -51,6 +51,66 @@ test("closed config rejects unsupported fields, IDs, paths, ports, and versions 
   }
 });
 
+test("version-1 resident config accepts a static 'targets' list as an alternative to a single repo", () => {
+  assert.deepEqual(
+    parseResidentConfig({
+      version: 1,
+      adapters: {
+        "open-code-review": {
+          enabled: true,
+          targets: [
+            { id: "target-a", repo: REPO },
+            { id: "target-b", repo: `${REPO}-b` }
+          ]
+        }
+      }
+    }),
+    {
+      version: 1,
+      port: 8787,
+      adapters: {
+        "open-code-review": {
+          enabled: true,
+          targets: [
+            { id: "target-a", repo: REPO },
+            { id: "target-b", repo: `${REPO}-b` }
+          ]
+        }
+      }
+    }
+  );
+});
+
+test("'targets' is rejected when empty, duplicated, path-shaped, mixed with repo, or pointing at an unsafe/relative path", () => {
+  const invalidConfigs = [
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [] } } },
+    {
+      version: 1,
+      adapters: {
+        "open-code-review": {
+          enabled: true,
+          targets: [
+            { id: "same", repo: REPO },
+            { id: "same", repo: `${REPO}-b` }
+          ]
+        }
+      }
+    },
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [{ id: "../../etc/passwd", repo: REPO }] } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, repo: REPO, targets: [{ id: "a", repo: REPO }] } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [{ id: "a", repo: "relative/repository" }] } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [{ id: "a" }] } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [{ repo: REPO }] } } }
+  ];
+
+  for (const config of invalidConfigs) {
+    assert.throws(
+      () => parseResidentConfig(config),
+      (error) => error instanceof ResidentConfigError && !error.message.includes(REPO)
+    );
+  }
+});
+
 test("invalid config is rejected before resident startup side effects", () => {
   let serverFactoryCalls = 0;
   let registryFactoryCalls = 0;

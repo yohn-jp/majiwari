@@ -202,6 +202,24 @@ export async function checkAdapterHealth(repoRoot) {
   };
 }
 
+/**
+ * Extract the absolute repository root from a target-provider's resolved
+ * descriptor (`@majiwari/registry`'s `resolve()` output, adapter-defined
+ * shape). OCR's own convention is `{ repoRoot: "<absolute path>" }`; anything
+ * else -- missing, non-string, relative, empty -- fails closed instead of
+ * ever reaching git/OCR/filesystem access with an unusable value.
+ */
+export function extractDescriptorRepoRoot(descriptor) {
+  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)) {
+    throw new Error("resolved target descriptor is malformed");
+  }
+  const { repoRoot } = descriptor;
+  if (typeof repoRoot !== "string" || repoRoot.length === 0 || !path.isAbsolute(repoRoot)) {
+    throw new Error("resolved target descriptor must identify an absolute repository root");
+  }
+  return repoRoot;
+}
+
 export function parseJson(stdout, label) {
   try {
     return JSON.parse(stdout);

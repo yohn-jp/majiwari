@@ -11,7 +11,7 @@
     "start": "node src/server.js",
     "start:registry": "node src/runtime.js",
     "test": "node --test",
-    "check": "node --check src/core.js && node --check src/index.js && node --check src/server.js && node --check src/doctor.js && node --check src/manifest.js && node --check src/runtime.js",
+    "check": "node --check src/core.js && node --check src/index.js && node --check src/server.js && node --check src/doctor.js && node --check src/manifest.js && node --check src/runtime.js && node --check src/build-server.js && node --check src/managed-transport.js && node --check src/local-target-provider.js",
     "doctor": "node src/doctor.js"
   },
   "dependencies": {

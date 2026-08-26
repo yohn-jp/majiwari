@@ -1,19 +1,46 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
+import { targetIdSchema } from "@majiwari/registry";
 
 export const RESIDENT_CONFIG_VERSION = 1;
 export const DEFAULT_RESIDENT_PORT = 8787;
 export const DEFAULT_RESIDENT_CONFIG_FILE = "majiwari.runtime.json";
 
-const enabledAdapterSchema = z
+const repoPathSchema = z
+  .string()
+  .min(1, "repo is required")
+  .refine((value) => path.isAbsolute(value), "repo must be an absolute path")
+  .refine((value) => !value.includes("\0") && !/[\r\n]/u.test(value), "repo contains unsafe characters");
+
+const enabledSingleRepoAdapterSchema = z
   .object({
     enabled: z.literal(true),
-    repo: z
-      .string()
-      .min(1, "repo is required")
-      .refine((value) => path.isAbsolute(value), "repo must be an absolute path")
-      .refine((value) => !value.includes("\0") && !/[\r\n]/u.test(value), "repo contains unsafe characters")
+    repo: repoPathSchema
+  })
+  .strict();
+
+// A second, generic shape for "enabled": a static list of named targets
+// (id + absolute repo path) instead of one fixed repo. Config stays
+// adapter-agnostic here -- it is only "repo, or a list of id/repo pairs";
+// what an adapter *does* with `targets` (or whether it supports the field
+// at all) is decided at the trusted composition edge (`catalog.js`), not
+// here. This is the seam #29's fixture/local target-provider smoke uses;
+// it carries no Mottainai-specific (#30/#45) discovery of its own.
+const enabledMultiTargetAdapterSchema = z
+  .object({
+    enabled: z.literal(true),
+    targets: z
+      .array(
+        z
+          .object({
+            id: targetIdSchema,
+            repo: repoPathSchema
+          })
+          .strict()
+      )
+      .min(1, "targets must contain at least one entry")
+      .refine((targets) => new Set(targets.map((target) => target.id)).size === targets.length, "target ids must be unique")
   })
   .strict();
 
@@ -23,7 +50,7 @@ const disabledAdapterSchema = z
   })
   .strict();
 
-const adapterConfigSchema = z.union([enabledAdapterSchema, disabledAdapterSchema]);
+const adapterConfigSchema = z.union([enabledSingleRepoAdapterSchema, enabledMultiTargetAdapterSchema, disabledAdapterSchema]);
 
 const adaptersSchema = z
   .object({
@@ -100,5 +127,8 @@ export function enabledResidentAdapters(config) {
   const normalized = parseResidentConfig(config);
   return ["open-code-review", "inari"]
     .filter((id) => normalized.adapters[id]?.enabled === true)
-    .map((id) => ({ id, repo: normalized.adapters[id].repo }));
+    .map((id) => {
+      const adapter = normalized.adapters[id];
+      return "targets" in adapter ? { id, targets: adapter.targets } : { id, repo: adapter.repo };
+    });
 }

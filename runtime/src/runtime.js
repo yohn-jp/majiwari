@@ -159,7 +159,7 @@ export class ResidentRuntime {
   async #startInternal() {
     const repos = Object.values(this.#config.adapters)
       .filter((adapter) => adapter?.enabled)
-      .map((adapter) => adapter.repo);
+      .flatMap((adapter) => ("targets" in adapter ? adapter.targets.map((target) => target.repo) : [adapter.repo]));
 
     try {
       this.#registry = this.#registryFactory();
