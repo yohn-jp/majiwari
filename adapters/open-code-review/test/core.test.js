@@ -6,6 +6,7 @@ import {
   buildRuleArgs,
   buildRulesCheckArgs,
   buildScanPreviewArgs,
+  extractDescriptorRepoRoot,
   parseServerArgs,
   validateRef,
   validateRelativePath
@@ -82,4 +83,16 @@ test("workspace untracked reads whole file", () => {
     buildDiffArgs({ mode: "workspace", filePath: "src/new.ts", workspaceSource: "untracked" }),
     { command: null, args: [], kind: "file", path: "src/new.ts" }
   );
+});
+
+test("resolved target descriptor requires an absolute repoRoot", () => {
+  assert.equal(extractDescriptorRepoRoot({ repoRoot: "/abs/worktree" }), "/abs/worktree");
+  assert.throws(() => extractDescriptorRepoRoot(undefined), /malformed/);
+  assert.throws(() => extractDescriptorRepoRoot(null), /malformed/);
+  assert.throws(() => extractDescriptorRepoRoot("just-a-string"), /malformed/);
+  assert.throws(() => extractDescriptorRepoRoot(["/abs/worktree"]), /malformed/);
+  assert.throws(() => extractDescriptorRepoRoot({}), /absolute repository root/);
+  assert.throws(() => extractDescriptorRepoRoot({ repoRoot: "relative/worktree" }), /absolute repository root/);
+  assert.throws(() => extractDescriptorRepoRoot({ repoRoot: "" }), /absolute repository root/);
+  assert.throws(() => extractDescriptorRepoRoot({ repoRoot: 123 }), /absolute repository root/);
 });

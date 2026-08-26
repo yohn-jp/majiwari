@@ -18,6 +18,7 @@ Use this workflow for OCR delegated code review. Do not invent a separate review
 2. If delegation JSON support is unavailable, stop and report the OCR compatibility problem. Do not fall back to `ocr review`.
 3. Never request OCR LLM credentials. Delegation mode is LLM-free on the OCR side.
 4. All tools exposed by this adapter are read-only. Do not mutate the repository as part of this skill.
+5. If the adapter is managed (multi-target), obtain `targetId` before the first workspace-sensitive call and pass the exact same `targetId` on every `ocr_delegate_preview`, `ocr_delegate_rules`, `scan_delegate_preview`, `ocr_rules_check`, `repo_diff`, `repo_read_file`, and `repo_search` call for this workflow. Never infer, remember, or reuse a `targetId` from an earlier session or workflow -- treat it the same as any other required call argument. Standalone/single-repository adapters omit `targetId` entirely.
 
 ## Workflow
 
