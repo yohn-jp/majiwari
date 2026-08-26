@@ -1,5 +1,5 @@
 import path from "node:path";
-import { createManifest as createOpenCodeReviewManifest, createLocalTargetProvider } from "@majiwari/adapter-open-code-review";
+import { createManifest as createOpenCodeReviewManifest, createLocalTargetProvider, createMottainaiTargetProvider } from "@majiwari/adapter-open-code-review";
 import { createManifest as createInariManifest } from "@majiwari/adapter-inari";
 import { enabledResidentAdapters, parseResidentConfig } from "./config.js";
 
@@ -10,23 +10,29 @@ export const TRUSTED_RESIDENT_ADAPTER_IDS = Object.freeze(["open-code-review", "
  * selects an id and repository path(s); it never selects executable/module/
  * URL material. Adapter-specific selection stays at this composition edge.
  *
- * Each factory receives `{ repo }` (single-repository config) or
- * `{ targets }` (a static list of `{ id, repo }` entries, config.js's
- * `targets` shape) depending on which the resident config declared for that
- * adapter id -- see `config.js`. OCR is the only adapter that currently
- * understands `targets`: it builds the injected fixture/local target
- * provider (#26/#29) from it and switches to managed, target-aware
- * execution (`createManifest({ targetProvider })`,
+ * Each factory receives `{ repo }` (single-repository config), `{ targets }`
+ * (a static list of `{ id, repo }` entries, config.js's `targets` shape), or
+ * `{ mottainai }` (config.js's `mottainai` shape: `{ command?, cwd? }`)
+ * depending on which the resident config declared for that adapter id --
+ * see `config.js`. OCR is the only adapter that currently understands
+ * `targets`/`mottainai`: `targets` builds the injected fixture/local target
+ * provider (#26/#29); `mottainai` builds the real Mottainai-CLI-backed
+ * target provider (#30, `adapters/open-code-review/src/
+ * mottainai-target-provider.js`). Either way it switches to managed,
+ * target-aware execution (`createManifest({ targetProvider })`,
  * `adapters/open-code-review/src/managed-transport.js`) -- one resident
- * adapter process serving every configured targetId, no restart between
- * them, no Mottainai-specific discovery (#30/#45) of any kind. Inari has no
- * such capability and fails closed if `targets` is configured for it.
+ * adapter process serving every discovered targetId, no restart between
+ * them. Inari has neither capability and fails closed if `targets` or
+ * `mottainai` is configured for it.
  */
 export const TRUSTED_RESIDENT_CATALOG = Object.freeze({
   // Resident child stderr is intentionally ignored: adapter diagnostics are
   // not a public status channel and may contain local filesystem paths.
-  "open-code-review": ({ repo, targets }) =>
-    targets
+  "open-code-review": ({ repo, targets, mottainai }) => {
+    if (mottainai) {
+      return createOpenCodeReviewManifest({ targetProvider: createMottainaiTargetProvider(mottainai), stderr: "ignore" });
+    }
+    return targets
       ? createOpenCodeReviewManifest({
           // config.js's `targets` entries use `repo` (matching this file's
           // single-repository config field); `createLocalTargetProvider`'s
@@ -35,9 +41,11 @@ export const TRUSTED_RESIDENT_CATALOG = Object.freeze({
           targetProvider: createLocalTargetProvider(targets.map((target) => ({ id: target.id, repoRoot: target.repo }))),
           stderr: "ignore"
         })
-      : createOpenCodeReviewManifest({ repo, stderr: "ignore" }),
-  inari: ({ repo, targets }) => {
+      : createOpenCodeReviewManifest({ repo, stderr: "ignore" });
+  },
+  inari: ({ repo, targets, mottainai }) => {
     if (targets) throw new Error('inari does not support the resident "targets" config; it remains a single-repository adapter');
+    if (mottainai) throw new Error('inari does not support the resident "mottainai" config; it remains a single-repository adapter');
     return createInariManifest({ repo, stderr: "ignore" });
   }
 });
@@ -66,9 +74,18 @@ function redactValue(value, repos) {
   return value;
 }
 
-/** Every configured repository path for one adapter entry (`{ repo }` or `{ targets }`), for redaction. */
+/**
+ * Every configured local filesystem path for one adapter entry (`{ repo }`,
+ * `{ targets }`, or `{ mottainai }`), for redaction. A `mottainai` entry has
+ * no configured repository path -- discovery is entirely dynamic -- so only
+ * its own optional invocation `cwd` (if set) is redaction-worthy; any
+ * worktree path Mottainai itself resolves is never held here and never
+ * reaches this function.
+ */
 function entryRepos(entry) {
-  return entry.targets ? entry.targets.map((target) => target.repo) : [entry.repo];
+  if (entry.targets) return entry.targets.map((target) => target.repo);
+  if (entry.mottainai) return entry.mottainai.cwd ? [entry.mottainai.cwd] : [];
+  return [entry.repo];
 }
 
 /** Make resident-facing hook errors and generic health/tool projections path-safe. */

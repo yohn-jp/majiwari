@@ -44,13 +44,33 @@ const enabledMultiTargetAdapterSchema = z
   })
   .strict();
 
+// A third, adapter-agnostic-in-shape "enabled" variant (#30): instead of a
+// fixed repo or a static targets list, delegate discovery to the real
+// Mottainai CLI. `command`/`cwd` are the only knobs -- no registry file, no
+// Manager URL, no filesystem root to scan -- because the provider itself
+// (adapters/open-code-review/src/mottainai-target-provider.js) only ever
+// shells out to Mottainai's own public `task list`/`task status` contract.
+// Same as `targets`, whether an adapter id actually supports `mottainai` is
+// decided at the trusted composition edge (catalog.js), not here.
+const enabledMottainaiAdapterSchema = z
+  .object({
+    enabled: z.literal(true),
+    mottainai: z
+      .object({
+        command: z.string().min(1).optional(),
+        cwd: repoPathSchema.optional()
+      })
+      .strict()
+  })
+  .strict();
+
 const disabledAdapterSchema = z
   .object({
     enabled: z.literal(false)
   })
   .strict();
 
-const adapterConfigSchema = z.union([enabledSingleRepoAdapterSchema, enabledMultiTargetAdapterSchema, disabledAdapterSchema]);
+const adapterConfigSchema = z.union([enabledSingleRepoAdapterSchema, enabledMultiTargetAdapterSchema, enabledMottainaiAdapterSchema, disabledAdapterSchema]);
 
 const adaptersSchema = z
   .object({
@@ -129,6 +149,8 @@ export function enabledResidentAdapters(config) {
     .filter((id) => normalized.adapters[id]?.enabled === true)
     .map((id) => {
       const adapter = normalized.adapters[id];
-      return "targets" in adapter ? { id, targets: adapter.targets } : { id, repo: adapter.repo };
+      if ("targets" in adapter) return { id, targets: adapter.targets };
+      if ("mottainai" in adapter) return { id, mottainai: adapter.mottainai };
+      return { id, repo: adapter.repo };
     });
 }

@@ -111,6 +111,50 @@ test("'targets' is rejected when empty, duplicated, path-shaped, mixed with repo
   }
 });
 
+test("version-1 resident config accepts a 'mottainai' provider config as an alternative to repo/targets", () => {
+  assert.deepEqual(
+    parseResidentConfig({
+      version: 1,
+      adapters: {
+        "open-code-review": { enabled: true, mottainai: { command: "mottainai", cwd: REPO } }
+      }
+    }),
+    {
+      version: 1,
+      port: 8787,
+      adapters: {
+        "open-code-review": { enabled: true, mottainai: { command: "mottainai", cwd: REPO } }
+      }
+    }
+  );
+
+  // command/cwd are both optional -- an empty options object is valid.
+  assert.deepEqual(
+    parseResidentConfig({
+      version: 1,
+      adapters: { "open-code-review": { enabled: true, mottainai: {} } }
+    }).adapters["open-code-review"],
+    { enabled: true, mottainai: {} }
+  );
+});
+
+test("'mottainai' is rejected when mixed with repo/targets, or given an unsafe/relative/unsupported field", () => {
+  const invalidConfigs = [
+    { version: 1, adapters: { "open-code-review": { enabled: true, repo: REPO, mottainai: {} } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, targets: [{ id: "a", repo: REPO }], mottainai: {} } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, mottainai: { cwd: "relative/path" } } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, mottainai: { command: "" } } } },
+    { version: 1, adapters: { "open-code-review": { enabled: true, mottainai: { url: "http://127.0.0.1" } } } }
+  ];
+
+  for (const config of invalidConfigs) {
+    assert.throws(
+      () => parseResidentConfig(config),
+      (error) => error instanceof ResidentConfigError && !error.message.includes(REPO)
+    );
+  }
+});
+
 test("invalid config is rejected before resident startup side effects", () => {
   let serverFactoryCalls = 0;
   let registryFactoryCalls = 0;
