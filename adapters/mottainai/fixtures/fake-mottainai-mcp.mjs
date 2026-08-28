@@ -45,6 +45,7 @@ server.registerTool(
       evidence: {},
       artifacts: [],
       truncated: false,
+      ...(configPath !== undefined && { configPath }),
       capabilities: {
         schemaVersion: incompatible ? 999 : 1,
         protocol: "mcp",
