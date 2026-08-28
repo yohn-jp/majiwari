@@ -155,6 +155,47 @@ test("'mottainai' is rejected when mixed with repo/targets, or given an unsafe/r
   }
 });
 
+test("version-1 resident config accepts a trusted 'mottainai' adapter entry with only an optional 'config' path", () => {
+  assert.deepEqual(
+    parseResidentConfig({
+      version: 1,
+      adapters: { mottainai: { enabled: true, config: REPO } }
+    }),
+    {
+      version: 1,
+      port: 8787,
+      adapters: { mottainai: { enabled: true, config: REPO } }
+    }
+  );
+
+  // 'config' is optional -- enabling with no path is valid.
+  assert.deepEqual(
+    parseResidentConfig({
+      version: 1,
+      adapters: { mottainai: { enabled: true } }
+    }).adapters.mottainai,
+    { enabled: true }
+  );
+});
+
+test("the trusted 'mottainai' adapter entry is closed to repo/targets/command/args/env and unsafe/relative config paths", () => {
+  const invalidConfigs = [
+    { version: 1, adapters: { mottainai: { enabled: true, repo: REPO } } },
+    { version: 1, adapters: { mottainai: { enabled: true, targets: [{ id: "a", repo: REPO }] } } },
+    { version: 1, adapters: { mottainai: { enabled: true, command: "node" } } },
+    { version: 1, adapters: { mottainai: { enabled: true, args: [] } } },
+    { version: 1, adapters: { mottainai: { enabled: true, env: {} } } },
+    { version: 1, adapters: { mottainai: { enabled: true, config: "relative/config.json" } } }
+  ];
+
+  for (const config of invalidConfigs) {
+    assert.throws(
+      () => parseResidentConfig(config),
+      (error) => error instanceof ResidentConfigError && !error.message.includes(REPO)
+    );
+  }
+});
+
 test("invalid config is rejected before resident startup side effects", () => {
   let serverFactoryCalls = 0;
   let registryFactoryCalls = 0;

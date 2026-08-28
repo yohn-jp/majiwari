@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AdapterState } from "@majiwari/registry";
 import { AdapterRegistry } from "@majiwari/registry";
-import { createConfiguredManifests, TRUSTED_RESIDENT_CATALOG } from "../src/catalog.js";
+import { createConfiguredManifests, TRUSTED_RESIDENT_ADAPTER_IDS, TRUSTED_RESIDENT_CATALOG } from "../src/catalog.js";
 
 test("a resident 'mottainai' config for open-code-review builds a managed, target-aware manifest", async () => {
   const [{ manifest }] = createConfiguredManifests({
@@ -31,4 +31,33 @@ test("open-code-review 'mottainai' config takes precedence and never falls back 
   const manifest = TRUSTED_RESIDENT_CATALOG["open-code-review"]({ id: "open-code-review", mottainai: {}, repo: undefined, targets: undefined });
   assert.equal(manifest.id, "open-code-review");
   assert.equal(typeof manifest.targetProvider?.resolve, "function");
+});
+
+test("the trusted catalog includes the 'mottainai' gateway adapter id (#56)", () => {
+  assert.deepEqual(TRUSTED_RESIDENT_ADAPTER_IDS, ["open-code-review", "inari", "mottainai"]);
+  assert.equal(typeof TRUSTED_RESIDENT_CATALOG.mottainai, "function");
+});
+
+test("a resident 'mottainai' config builds the trusted Mottainai gateway-adapter manifest and passes 'config' through as the launch selector", async () => {
+  const [{ manifest }] = createConfiguredManifests({
+    version: 1,
+    adapters: { mottainai: { enabled: true } }
+  });
+
+  assert.equal(manifest.id, "mottainai");
+  assert.equal(manifest.transport.kind, "stdio");
+  // No Mottainai-specific health() is invented at this composition edge --
+  // the generic registry lifecycle state is the adapter's own health
+  // signal, same as its manifest declares (adapters/mottainai/src/manifest.js).
+  assert.equal(manifest.health, undefined);
+
+  const registry = new AdapterRegistry();
+  registry.register(manifest);
+  const started = await registry.start("mottainai");
+  // No real "mottainai-mcp" binary is installed in this test environment:
+  // startup fails deterministically (ERRORED), isolated to this one
+  // adapter's own registry entry, exactly as #56 requires -- it never
+  // throws out of the resident catalog/registry contract.
+  assert.equal(started.state, AdapterState.ERRORED);
+  assert.ok(started.error);
 });

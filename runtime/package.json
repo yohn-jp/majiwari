@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@majiwari/adapter-inari": "0.1.0",
+    "@majiwari/adapter-mottainai": "0.1.0",
     "@majiwari/adapter-open-code-review": "0.1.0",
     "@majiwari/gateway": "0.2.0",
     "@majiwari/registry": "0.1.0",

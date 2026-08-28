@@ -7,11 +7,15 @@ export const RESIDENT_CONFIG_VERSION = 1;
 export const DEFAULT_RESIDENT_PORT = 8787;
 export const DEFAULT_RESIDENT_CONFIG_FILE = "majiwari.runtime.json";
 
-const repoPathSchema = z
-  .string()
-  .min(1, "repo is required")
-  .refine((value) => path.isAbsolute(value), "repo must be an absolute path")
-  .refine((value) => !value.includes("\0") && !/[\r\n]/u.test(value), "repo contains unsafe characters");
+function absolutePathSchema(label) {
+  return z
+    .string()
+    .min(1, `${label} is required`)
+    .refine((value) => path.isAbsolute(value), `${label} must be an absolute path`)
+    .refine((value) => !value.includes("\0") && !/[\r\n]/u.test(value), `${label} contains unsafe characters`);
+}
+
+const repoPathSchema = absolutePathSchema("repo");
 
 const enabledSingleRepoAdapterSchema = z
   .object({
@@ -72,10 +76,29 @@ const disabledAdapterSchema = z
 
 const adapterConfigSchema = z.union([enabledSingleRepoAdapterSchema, enabledMultiTargetAdapterSchema, enabledMottainaiAdapterSchema, disabledAdapterSchema]);
 
+// The trusted built-in `mottainai` gateway adapter (#56): a closed, distinct
+// shape from `adapterConfigSchema` above -- it never accepts `repo`/
+// `targets`, since it launches Mottainai's own packaged `mottainai-mcp`
+// entrypoint rather than being bound to a Git checkout. `config`, when
+// given, is the one optional selector that entrypoint's own public launch
+// contract documents (`--config <path>`, yohn-jp/mottainai#548). No
+// executable/argument/environment/module field is accepted here -- the
+// trusted composition edge (`catalog.js`) is the only place allowed to
+// choose what actually runs.
+const enabledMottainaiMcpAdapterSchema = z
+  .object({
+    enabled: z.literal(true),
+    config: absolutePathSchema("config").optional()
+  })
+  .strict();
+
+const mottainaiMcpAdapterConfigSchema = z.union([enabledMottainaiMcpAdapterSchema, disabledAdapterSchema]);
+
 const adaptersSchema = z
   .object({
     "open-code-review": adapterConfigSchema.optional(),
-    inari: adapterConfigSchema.optional()
+    inari: adapterConfigSchema.optional(),
+    mottainai: mottainaiMcpAdapterConfigSchema.optional()
   })
   .strict();
 
@@ -145,10 +168,11 @@ export async function loadResidentConfig(filePath = DEFAULT_RESIDENT_CONFIG_FILE
 
 export function enabledResidentAdapters(config) {
   const normalized = parseResidentConfig(config);
-  return ["open-code-review", "inari"]
+  return ["open-code-review", "inari", "mottainai"]
     .filter((id) => normalized.adapters[id]?.enabled === true)
     .map((id) => {
       const adapter = normalized.adapters[id];
+      if (id === "mottainai") return { id, ...(adapter.config !== undefined && { config: adapter.config }) };
       if ("targets" in adapter) return { id, targets: adapter.targets };
       if ("mottainai" in adapter) return { id, mottainai: adapter.mottainai };
       return { id, repo: adapter.repo };

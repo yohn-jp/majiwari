@@ -159,7 +159,14 @@ export class ResidentRuntime {
   async #startInternal() {
     const repos = Object.values(this.#config.adapters)
       .filter((adapter) => adapter?.enabled)
-      .flatMap((adapter) => ("targets" in adapter ? adapter.targets.map((target) => target.repo) : [adapter.repo]));
+      .flatMap((adapter) => {
+        if ("targets" in adapter) return adapter.targets.map((target) => target.repo);
+        if ("mottainai" in adapter) return adapter.mottainai.cwd ? [adapter.mottainai.cwd] : [];
+        // The trusted `mottainai` adapter id (#56) has no configured
+        // repository -- only its optional `config` file path.
+        if ("config" in adapter) return adapter.config ? [adapter.config] : [];
+        return [adapter.repo];
+      });
 
     try {
       this.#registry = this.#registryFactory();
