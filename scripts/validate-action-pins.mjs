@@ -19,7 +19,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { load } from "js-yaml";
+import yaml from "js-yaml";
 
 const SHA_PIN = /@[0-9a-f]{40}$/;
 const DOCKER_DIGEST_PIN = /@sha256:[0-9a-f]{64}$/;
@@ -123,7 +123,7 @@ export function validateActionPinsFile(filePath) {
   const raw = readFileSync(filePath, "utf8");
   let doc;
   try {
-    doc = load(raw);
+    doc = yaml.load(raw);
   } catch (cause) {
     return [`${filePath}: invalid YAML: ${cause.message}`];
   }

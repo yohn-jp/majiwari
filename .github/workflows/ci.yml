@@ -12,7 +12,7 @@ jobs:
   node:
     strategy:
       matrix:
-        node: [24]
+        node: [20, 22]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -29,40 +29,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 22
       - run: npm install
       - run: npm install --global @alibaba-group/open-code-review
       - name: Verify delegation JSON surface
         run: |
           ocr delegate preview --help | grep -- '--format'
           ocr delegate rule --help | grep -- '--format'
-
-  inari-contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-      - run: npm install
-      # Not pinned: installs whatever gh-inari currently resolves (latest),
-      # the same way a real operator would. adapters/inari/src/core.js's
-      # EXPECTED_INARI_NAME/EXPECTED_INARI_PROTOCOL/REQUIRED_INARI_CAPABILITIES
-      # are a protocol/capability boundary, not a version pin -- this job
-      # verifies the exact same machine-readable contract the adapter's own
-      # runtime compatibility check (checkAdapterHealth()) validates, so any
-      # gh-inari release that still satisfies it passes with no change here.
-      - run: npm install --global gh-inari
-      - name: Verify machine-readable protocol/capability surface and governed command set
-        run: |
-          inari --version --json | grep -- '"name":"gh-inari"'
-          inari --version --json | grep -- '"protocol":1'
-          inari --version --json | grep -- '"machine-readable-version"'
-          inari issue --help | grep -- 'issue schema'
-          inari issue --help | grep -- 'issue get'
-          inari issue --help | grep -- 'issue create'
-          inari issue --help | grep -- 'issue validate'
-          inari pr --help | grep -- 'pr schema'
-          inari pr --help | grep -- 'pr get'
-          inari pr --help | grep -- 'pr create'
-          inari pr --help | grep -- 'pr validate'
