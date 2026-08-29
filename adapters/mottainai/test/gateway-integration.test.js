@@ -179,11 +179,12 @@ test("stopping the Mottainai adapter does not affect a sibling adapter published
       const afterPing = await siblingClient.callTool({ name: "ping", arguments: {} });
       assert.equal(afterPing.structuredContent.pong, true);
 
-      // Verify route removal without constructing a client transport whose
-      // failed initialization can retain an HTTP handle until process exit.
+      // unpublish() stops but deliberately keeps the compatibility registry
+      // entry. The route therefore reports the generic stopped-state contract.
       const stoppedRoute = await fetch(`http://127.0.0.1:${port}/mcp/${ADAPTER_ID}`, { method: "POST" });
-      assert.equal(stoppedRoute.status, 404);
-      await stoppedRoute.body?.cancel();
+      const stoppedBody = await stoppedRoute.text();
+      assert.equal(stoppedRoute.status, 409);
+      assert.equal(stoppedBody, `adapter "${ADAPTER_ID}" is not running`);
     } finally {
       await mottainaiClient?.close().catch(() => {});
       await siblingClient?.close().catch(() => {});
