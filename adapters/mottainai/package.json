@@ -1,0 +1,23 @@
+{
+  "name": "@majiwari/adapter-mottainai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "description": "Gateway/transport-only MCP adapter that launches the installed Mottainai native MCP entrypoint (mottainai-mcp) and republishes its tools unchanged. Owns no Mottainai delegation/lifecycle semantics.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/manifest.js"
+  },
+  "dependencies": {
+    "@majiwari/gateway": "0.2.0",
+    "@majiwari/registry": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

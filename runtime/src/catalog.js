@@ -1,9 +1,10 @@
 import path from "node:path";
 import { createManifest as createOpenCodeReviewManifest, createLocalTargetProvider, createMottainaiTargetProvider } from "@majiwari/adapter-open-code-review";
 import { createManifest as createInariManifest } from "@majiwari/adapter-inari";
+import { createManifest as createMottainaiMcpManifest } from "@majiwari/adapter-mottainai";
 import { enabledResidentAdapters, parseResidentConfig } from "./config.js";
 
-export const TRUSTED_RESIDENT_ADAPTER_IDS = Object.freeze(["open-code-review", "inari"]);
+export const TRUSTED_RESIDENT_ADAPTER_IDS = Object.freeze(["open-code-review", "inari", "mottainai"]);
 
 /**
  * The only factories reachable from the CLI's resident config. User config
@@ -24,6 +25,17 @@ export const TRUSTED_RESIDENT_ADAPTER_IDS = Object.freeze(["open-code-review", "
  * adapter process serving every discovered targetId, no restart between
  * them. Inari has neither capability and fails closed if `targets` or
  * `mottainai` is configured for it.
+ *
+ * The `mottainai` catalog *id* below (#56) is unrelated to OCR's nested
+ * `mottainai` config field above: OCR's field selects a target-discovery
+ * provider that shells out to the `mottainai` CLI's `task list`/`task
+ * status` contract (#30/#539); this id registers a normal trusted adapter
+ * that launches Mottainai's own packaged, documented `mottainai-mcp` MCP
+ * entrypoint (#548) and republishes its tools unchanged at `/mcp/mottainai`
+ * -- gateway/transport only, per #56. Its factory receives `{ config }`
+ * (config.js's `mottainai` catalog entry's optional absolute `config` path,
+ * passed straight through as `--config <path>`); it never receives or
+ * accepts an executable/argument/environment override from resident config.
  */
 export const TRUSTED_RESIDENT_CATALOG = Object.freeze({
   // Resident child stderr is intentionally ignored: adapter diagnostics are
@@ -47,7 +59,8 @@ export const TRUSTED_RESIDENT_CATALOG = Object.freeze({
     if (targets) throw new Error('inari does not support the resident "targets" config; it remains a single-repository adapter');
     if (mottainai) throw new Error('inari does not support the resident "mottainai" config; it remains a single-repository adapter');
     return createInariManifest({ repo, stderr: "ignore" });
-  }
+  },
+  mottainai: ({ config }) => createMottainaiMcpManifest({ config, stderr: "ignore" })
 });
 
 function errorText(error) {
@@ -76,15 +89,18 @@ function redactValue(value, repos) {
 
 /**
  * Every configured local filesystem path for one adapter entry (`{ repo }`,
- * `{ targets }`, or `{ mottainai }`), for redaction. A `mottainai` entry has
- * no configured repository path -- discovery is entirely dynamic -- so only
- * its own optional invocation `cwd` (if set) is redaction-worthy; any
- * worktree path Mottainai itself resolves is never held here and never
- * reaches this function.
+ * `{ targets }`, `{ mottainai }`, or the `mottainai` catalog id's `{ config
+ * }`), for redaction. An OCR `{ mottainai }` entry has no configured
+ * repository path -- discovery is entirely dynamic -- so only its own
+ * optional invocation `cwd` (if set) is redaction-worthy; any worktree path
+ * Mottainai itself resolves is never held here and never reaches this
+ * function. The `mottainai` adapter id's own entry likewise has no
+ * configured repository -- only its optional `config` file path, if set.
  */
 function entryRepos(entry) {
   if (entry.targets) return entry.targets.map((target) => target.repo);
   if (entry.mottainai) return entry.mottainai.cwd ? [entry.mottainai.cwd] : [];
+  if (entry.id === "mottainai") return entry.config ? [entry.config] : [];
   return [entry.repo];
 }
 

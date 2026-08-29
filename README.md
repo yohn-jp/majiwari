@@ -9,6 +9,7 @@ Deterministic CLI/API-to-MCP adapters, plus a generic gateway that exposes any s
 ```text
 adapters/open-code-review/   deterministic MCP tools wrapping the ocr CLI (stdio)
 adapters/inari/               deterministic MCP tools wrapping the inari CLI (stdio)
+adapters/mottainai/           gateway/transport-only adapter that launches the installed mottainai-mcp entrypoint
 gateway/                     generic stdio MCP -> Streamable HTTP transport, no adapter-specific logic
 registry/                     versioned adapter manifest schema and runtime registry
 runtime/                      resident local runtime, trusted catalog, and loopback ingress
@@ -38,6 +39,7 @@ This project does not implement code review. OCR remains authoritative for deter
 - Git 2.41+
 - Alibaba OpenCodeReview (`ocr`), for the OCR adapter
 - Inari (`gh-inari`) and an authenticated `gh`, for the Inari adapter
+- the installed Mottainai package (`mottainai-mcp` on `PATH`), for the optional Mottainai gateway adapter -- see [`yohn-jp/mottainai`](https://github.com/yohn-jp/mottainai)
 - a Cloudflare account, for the Tunnel/Worker/Access Managed OAuth deployment (see [`deployments/cloudflare/docs/`](deployments/cloudflare/docs/))
 
 Install OCR:
@@ -59,6 +61,15 @@ inari --version --json
 ```
 
 The Inari adapter uses the current `gh` authentication and the target repository's Git remote; it does not maintain a second credential store. `adapters/inari/src/core.js` checks Inari's machine-readable identity/protocol/capability contract (not a version pin -- any `gh-inari` release that still reports the expected identity, protocol version, and required capabilities is compatible) and fails `adapter_health` clearly, rather than silently, if the installed `inari` does not satisfy it. `.github/workflows/ci.yml`'s `inari-contract` job installs whatever `gh-inari` currently resolves (latest) and verifies the same contract.
+
+Install Mottainai (optional, only for the `mottainai` gateway adapter):
+
+```bash
+npm install -g mottainai
+mottainai-mcp --config /absolute/path/to/mottainai.config.json
+```
+
+The Mottainai adapter (`adapters/mottainai/`) launches this same installed `mottainai-mcp` entrypoint as a child process and does not require a repository, credential, or config of its own beyond the one optional `--config` path.
 
 ## Install
 
@@ -119,10 +130,15 @@ Create a local config outside the repository (repository paths are private opera
     "inari": {
       "enabled": true,
       "repo": "/absolute/path/to/target-repository"
+    },
+    "mottainai": {
+      "enabled": true
     }
   }
 }
 ```
+
+`mottainai` is a normal trusted adapter entry, not a repository binding: it launches the installed `mottainai-mcp` entrypoint and takes only an optional `config` (absolute path, passed through as `--config <path>`) -- no `repo`, `targets`, command, argument, or environment field.
 
 Start it with:
 
@@ -134,6 +150,7 @@ The listener is always `127.0.0.1`; the one shared port serves:
 
 - `http://127.0.0.1:8787/mcp/open-code-review`
 - `http://127.0.0.1:8787/mcp/inari`
+- `http://127.0.0.1:8787/mcp/mottainai` (only if the `mottainai` adapter is enabled and `mottainai-mcp` is installed)
 - `http://127.0.0.1:8787/ui`
 - `http://127.0.0.1:8787/ui/api/adapters` and `/ui/api/adapters/:id`
 
@@ -178,6 +195,10 @@ There is deliberately no `review`, `fix`, `edit`, arbitrary `shell`, commit, or 
 
 Inari remains authoritative for template governance, semantic validation, and rendering; the adapter only translates arguments and normalizes results. There is no raw `gh` passthrough tool, and no `edit`/`normalize`/`sync` remediation tool in this initial surface.
 
+## MCP tools (`adapters/mottainai`)
+
+Mottainai (`yohn-jp/mottainai`) implements its own native harness-delegation MCP server natively; Majiwari does not reimplement it. `adapters/mottainai/` only launches the installed, packaged `mottainai-mcp` entrypoint and republishes whatever tools it advertises at `/mcp/mottainai` unchanged -- tool names, input schemas, output shapes, and structured errors are exactly Mottainai's own. Majiwari owns only adapter process/resource lifecycle, registry state, MCP session bridging, and route publication; it never renames a tool, rewrites arguments, infers a repository path, synthesizes a work ID, or caches delegated-work state. Mottainai's own docs (`docs/mcp-harness-delegation.md` in that repository) are authoritative for what its tools do; consult them, not this repository, for `mottainai_delegate_work`/`mottainai_inspect_work`/`mottainai_continue_work`/`mottainai_cancel_work`/`mottainai_harness_capabilities` semantics. Majiwari does not become required for local Mottainai MCP use -- `mottainai-mcp` remains directly usable without this gateway.
+
 ## Review contract
 
 For every delegated review, the host LLM must:
@@ -210,3 +231,5 @@ OpenCodeReview: https://github.com/alibaba/open-code-review
 The upstream project and Delegation Skill are Apache-2.0 licensed. This project preserves attribution and is intended to converge upstream rather than fork OCR's review behavior.
 
 Inari (`gh-inari`): https://github.com/yohn-jp/gh-inari, MIT licensed. This project preserves attribution and does not reimplement any Inari governance rule; the adapter only translates MCP calls to Inari's own CLI.
+
+Mottainai: https://github.com/yohn-jp/mottainai. This project does not reimplement or reinterpret any Mottainai harness-delegation tool, schema, or lifecycle semantics; the adapter only launches Mottainai's own packaged `mottainai-mcp` entrypoint and republishes its tools unchanged.

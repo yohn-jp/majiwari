@@ -7,6 +7,7 @@
   "workspaces": [
     "adapters/open-code-review",
     "adapters/inari",
+    "adapters/mottainai",
     "gateway",
     "registry",
     "ui",

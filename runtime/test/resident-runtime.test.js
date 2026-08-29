@@ -405,8 +405,8 @@ test("SIGINT/SIGTERM and concurrent shutdown share one cleanup path", async () =
   await waitForExit(pid);
 });
 
-test("the default resident catalog contains only the two trusted adapters", () => {
-  assert.deepEqual(Object.keys(TRUSTED_RESIDENT_CATALOG).sort(), ["inari", "open-code-review"]);
+test("the default resident catalog contains only the trusted adapters", () => {
+  assert.deepEqual(Object.keys(TRUSTED_RESIDENT_CATALOG).sort(), ["inari", "mottainai", "open-code-review"]);
 });
 
 async function createGitRepo(prefix, content) {
