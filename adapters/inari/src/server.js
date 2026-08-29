@@ -105,7 +105,13 @@ function registerSchemaTool(domain, name, title) {
       title,
       description: `Resolve Inari's canonical field schema for one ${domain === "issue" ? "Issue" : "pull request"} template. Inari is authoritative for which fields exist and are required.`,
       inputSchema: { template: z.string().min(1), compact: z.boolean().optional() },
-      outputSchema: { schema: z.unknown().optional(), ok: z.boolean().optional(), error: z.unknown().optional() },
+      outputSchema: {
+        contract: z.unknown().optional(),
+        template: z.unknown().optional(),
+        schema: z.unknown().optional(),
+        ok: z.boolean().optional(),
+        error: z.unknown().optional()
+      },
       annotations: READ_ONLY
     },
     async ({ template, compact }) => {
@@ -128,8 +134,14 @@ function registerGetTool(domain, name, title) {
       outputSchema: {
         valid: z.boolean().optional(),
         projection: z.string().optional(),
+        classification: z.string().optional(),
+        kind: z.string().optional(),
         number: z.number().optional(),
         url: z.string().optional(),
+        template: z.unknown().optional(),
+        metadata: z.unknown().optional(),
+        fields: z.unknown().optional(),
+        diagnostics: z.unknown().optional(),
         ok: z.boolean().optional(),
         error: z.unknown().optional()
       },
@@ -155,7 +167,12 @@ function registerValidateTool(domain, name, title) {
       },
       outputSchema: {
         valid: z.boolean().optional(),
+        classification: z.string().optional(),
+        number: z.number().optional(),
+        url: z.string().optional(),
+        diagnostics: z.unknown().optional(),
         violations: z.unknown().optional(),
+        values: z.unknown().optional(),
         missingFields: z.unknown().optional(),
         invalidFields: z.unknown().optional(),
         ok: z.boolean().optional(),
