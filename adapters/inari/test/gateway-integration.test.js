@@ -109,6 +109,26 @@ function withFakeInariOnPath(fn) {
       "  echo '{\"templates\":[{\"id\":\"feature\"}],\"semanticTemplates\":[]}'",
       "  exit 0",
       "fi",
+      // Representative real `gh-inari` response shapes (captured from the
+      // live 0.8.0 CLI) for the three tools whose declared outputSchema
+      // previously omitted fields the CLI actually emits (contract/
+      // template/classification/kind/metadata/fields/diagnostics/values),
+      // which the MCP client's Ajv-compiled validator then rejected as
+      // "must NOT have additional properties". These fixtures let this
+      // suite prove a real round trip through that validator, not just
+      // that the tool is callable.
+      'if [ "$1" = "pr" ] && [ "$2" = "schema" ]; then',
+      "  echo '{\"contract\":{\"artifactKind\":\"pull_request\"},\"template\":{\"id\":\"default\"},\"schema\":{\"type\":\"object\"}}'",
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "pr" ] && [ "$2" = "get" ]; then',
+      "  echo '{\"valid\":true,\"projection\":\"canonical\",\"classification\":\"valid\",\"kind\":\"pull_request\",\"number\":65,\"url\":\"https://example.invalid/pr/65\",\"template\":{\"id\":\"default\"},\"metadata\":{\"title\":\"t\"},\"fields\":{\"summary\":\"s\"}}'",
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "pr" ] && [ "$2" = "validate" ]; then',
+      "  echo '{\"valid\":true,\"classification\":\"valid\",\"number\":65,\"url\":\"https://example.invalid/pr/65\",\"diagnostics\":[],\"violations\":[],\"values\":{\"summary\":\"s\"},\"missingFields\":[],\"invalidFields\":[]}'",
+      "  exit 0",
+      "fi",
       "echo '{\"ok\":false,\"error\":{\"message\":\"unsupported fixture invocation\"}}'",
       "exit 1"
     ].join("\n")
@@ -194,6 +214,23 @@ test("Inari adapter registers, starts, and is published through the gateway at /
       const templates = await client.callTool({ name: "inari_template_list", arguments: {} });
       assert.equal(templates.isError, undefined);
       assert.deepEqual(templates.structuredContent.templates, [{ id: "feature" }]);
+
+      // Real `gh-inari` responses carry fields (contract/template/
+      // classification/kind/metadata/fields/diagnostics/values) beyond the
+      // MCP client's compiled output-schema validator's prior expectations;
+      // these calls prove the round trip is accepted, not rejected with
+      // "Structured content does not match the tool's output schema".
+      const schema = await client.callTool({ name: "inari_pr_schema", arguments: { template: "default" } });
+      assert.equal(schema.isError, undefined);
+      assert.equal(schema.structuredContent.template.id, "default");
+
+      const get = await client.callTool({ name: "inari_pr_get", arguments: { number: 65 } });
+      assert.equal(get.isError, undefined);
+      assert.equal(get.structuredContent.classification, "valid");
+
+      const validate = await client.callTool({ name: "inari_pr_validate", arguments: { number: 65 } });
+      assert.equal(validate.isError, undefined);
+      assert.deepEqual(validate.structuredContent.values, { summary: "s" });
     } finally {
       await client?.close();
       await gateway.close();
