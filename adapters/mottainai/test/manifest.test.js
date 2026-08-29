@@ -30,25 +30,23 @@ async function waitForExit(pid, timeoutMs = 5000) {
 function withFakeMottainaiMcpOnPath(fn, { incompatible = false, pidFile } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mottainai-adapter-fake-"));
   const binPath = path.join(dir, DEFAULT_MOTTAINAI_MCP_COMMAND);
-  fs.writeFileSync(binPath, `#!/bin/sh\nexec "${process.execPath}" "${FIXTURE_SERVER}" "$@"\n`);
+  // StdioClientTransport spawns this script with only a fixed, safe allowlist
+  // of inherited env vars (see the SDK's getDefaultEnvironment()) -- ambient
+  // process.env vars set here are never visible to the spawned child, so the
+  // fixture's own switches must be embedded directly into the script.
+  const envLines = [
+    incompatible ? `export MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE=1\n` : "",
+    pidFile ? `export MAJIWARI_TEST_MOTTAINAI_PID_FILE='${pidFile.replace(/'/g, `'\\''`)}'\n` : ""
+  ].join("");
+  fs.writeFileSync(binPath, `#!/bin/sh\n${envLines}exec "${process.execPath}" "${FIXTURE_SERVER}" "$@"\n`);
   fs.chmodSync(binPath, 0o755);
   const originalPath = process.env.PATH;
-  const originalIncompatible = process.env.MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE;
-  const originalPidFile = process.env.MAJIWARI_TEST_MOTTAINAI_PID_FILE;
   process.env.PATH = `${dir}${path.delimiter}${originalPath}`;
-  if (incompatible) process.env.MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE = "1";
-  else delete process.env.MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE;
-  if (pidFile) process.env.MAJIWARI_TEST_MOTTAINAI_PID_FILE = pidFile;
-  else delete process.env.MAJIWARI_TEST_MOTTAINAI_PID_FILE;
   return (async () => {
     try {
       return await fn();
     } finally {
       process.env.PATH = originalPath;
-      if (originalIncompatible === undefined) delete process.env.MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE;
-      else process.env.MAJIWARI_TEST_MOTTAINAI_INCOMPATIBLE = originalIncompatible;
-      if (originalPidFile === undefined) delete process.env.MAJIWARI_TEST_MOTTAINAI_PID_FILE;
-      else process.env.MAJIWARI_TEST_MOTTAINAI_PID_FILE = originalPidFile;
       fs.rmSync(dir, { recursive: true, force: true });
     }
   })();
