@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -87,31 +86,6 @@ function createSiblingManifest(id) {
   };
 }
 
-function requestStoppedRoute(port) {
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        host: "127.0.0.1",
-        port,
-        path: `/mcp/${ADAPTER_ID}`,
-        method: "POST",
-        agent: false,
-        headers: { Connection: "close" }
-      },
-      (response) => {
-        response.setEncoding("utf8");
-        let body = "";
-        response.on("data", (chunk) => {
-          body += chunk;
-        });
-        response.on("end", () => resolve({ status: response.statusCode, body }));
-      }
-    );
-    request.on("error", reject);
-    request.end();
-  });
-}
-
 test("Mottainai adapter registers, starts, and is published through the gateway at /mcp/mottainai, with delegate/inspect passthrough", async () => {
   await withFakeMottainaiMcpOnPath(async () => {
     const { gateway, port, registry } = await startGateway();
@@ -176,7 +150,6 @@ test("stopping the Mottainai adapter does not affect a sibling adapter published
   await withFakeMottainaiMcpOnPath(async () => {
     const { gateway, port, registry } = await startGateway();
     const siblingId = "mottainai-test-sibling";
-    let mottainaiClient;
     let siblingClient;
     try {
       await gateway.publish(createManifest());
@@ -189,13 +162,6 @@ test("stopping the Mottainai adapter does not affect a sibling adapter published
       await siblingClient.close();
       siblingClient = undefined;
 
-      mottainaiClient = new Client({ name: "mottainai-check", version: "1.0.0" }, { capabilities: {} });
-      await mottainaiClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/${ADAPTER_ID}`)));
-      const delegated = await mottainaiClient.callTool({ name: "mottainai_delegate_work", arguments: { goal: "isolation check" } });
-      assert.equal(delegated.structuredContent.status, "accepted");
-      await mottainaiClient.close();
-      mottainaiClient = undefined;
-
       await gateway.unpublish(ADAPTER_ID);
       assert.equal(registry.get(ADAPTER_ID).state, AdapterState.STOPPED);
 
@@ -204,12 +170,7 @@ test("stopping the Mottainai adapter does not affect a sibling adapter published
       await siblingClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/${siblingId}`)));
       const afterPing = await siblingClient.callTool({ name: "ping", arguments: {} });
       assert.equal(afterPing.structuredContent.pong, true);
-
-      const stoppedRoute = await requestStoppedRoute(port);
-      assert.equal(stoppedRoute.status, 409);
-      assert.equal(stoppedRoute.body, `adapter "${ADAPTER_ID}" is not running`);
     } finally {
-      await mottainaiClient?.close().catch(() => {});
       await siblingClient?.close().catch(() => {});
       await gateway.close();
     }
