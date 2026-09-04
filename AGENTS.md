@@ -88,7 +88,14 @@ Then finish the requested lifecycle:
 - Do not search for a compaction command/tool. Do not treat "compaction" as a task to perform.
 - If the runtime compacts context, resume from existing task state and changed files; do not repeat repository orientation or reread unchanged evidence.
 
-## 9. Precedence
+## 9. Governed GitHub operations prefer Inari
+
+- For governed Issue/PR/template operations, prefer `inari` over raw `gh`.
+- Before inventing workflow steps or flags, consult `inari skill` / `inari skill <scenario>`.
+- Live Inari skill output and this repository's governance schema (`.github/inari/**`) are authoritative for exact behavior. This file does not duplicate leaf-command flags or static playbooks.
+- Raw `gh` remains available for operations outside Inari's governed surface.
+
+## 10. Precedence
 
 - User instruction and accepted Issue define intent and scope.
 - Executable policy, schema, validator, and tests define exact machine behavior when relevant to the task.
