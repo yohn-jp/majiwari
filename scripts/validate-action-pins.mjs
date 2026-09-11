@@ -23,8 +23,10 @@ import yaml from "js-yaml";
 
 const SHA_PIN = /@[0-9a-f]{40}$/;
 const DOCKER_DIGEST_PIN = /@sha256:[0-9a-f]{64}$/;
-const ORG_REUSABLE_WORKFLOW = /^yohn-jp\/\.github\/\.github\/workflows\/[^@]+@([^@]+)$/u;
-const ORG_ISSUE_GOVERNANCE_WORKFLOW = "yohn-jp/.github/.github/workflows/issue-governance.yml@main";
+const ORG_REUSABLE_WORKFLOW =
+  /^yohn-jp\/\.github\/\.github\/workflows\/[^@]+@([^@]+)$/u;
+const ORG_ISSUE_GOVERNANCE_WORKFLOW =
+  "yohn-jp/.github/.github/workflows/issue-governance.yml@main";
 const LOCAL_ISSUE_VALIDATION_SCRIPT = /scripts\/validate-issue\.mjs/u;
 
 /**
@@ -63,7 +65,7 @@ export function validateActionPins(node, sourceLabel) {
     if (ref.startsWith("docker://")) {
       if (!DOCKER_DIGEST_PIN.test(ref)) {
         errors.push(
-          `${where}: docker action "${ref}" must be pinned by digest (docker://image@sha256:<64-hex-digest>)`,
+          `${where}: docker action "${ref}" must be pinned by digest (docker://image@sha256:<64-hex-digest>)`
         );
       }
       return;
@@ -73,20 +75,22 @@ export function validateActionPins(node, sourceLabel) {
     if (organizationWorkflow !== null) {
       if (organizationWorkflow[1] !== "main") {
         errors.push(
-          `${where}: organization-owned reusable workflow "${ref}" must use @main (third-party Actions remain SHA-pinned)`,
+          `${where}: organization-owned reusable workflow "${ref}" must use @main (third-party Actions remain SHA-pinned)`
         );
       }
       return;
     }
 
     if (!ref.includes("@")) {
-      errors.push(`${where}: "${ref}" has no @ref; must be pinned to a full commit SHA`);
+      errors.push(
+        `${where}: "${ref}" has no @ref; must be pinned to a full commit SHA`
+      );
       return;
     }
 
     if (!SHA_PIN.test(ref)) {
       errors.push(
-        `${where}: "${ref}" is not pinned to an immutable 40-character commit SHA (found a moving ref such as a tag or branch)`,
+        `${where}: "${ref}" is not pinned to an immutable 40-character commit SHA (found a moving ref such as a tag or branch)`
       );
     }
   }
@@ -109,7 +113,7 @@ export function validateIssueGovernanceDelegation(raw, sourceLabel) {
   }
   if (LOCAL_ISSUE_VALIDATION_SCRIPT.test(raw)) {
     return [
-      `${sourceLabel}: delegates to ${ORG_ISSUE_GOVERNANCE_WORKFLOW} but also references scripts/validate-issue.mjs locally; Issue contract validation must not be duplicated`,
+      `${sourceLabel}: delegates to ${ORG_ISSUE_GOVERNANCE_WORKFLOW} but also references scripts/validate-issue.mjs locally; Issue contract validation must not be duplicated`
     ];
   }
   return [];
@@ -129,7 +133,7 @@ export function validateActionPinsFile(filePath) {
   }
   return [
     ...validateActionPins(doc, filePath),
-    ...validateIssueGovernanceDelegation(raw, filePath),
+    ...validateIssueGovernanceDelegation(raw, filePath)
   ];
 }
 
